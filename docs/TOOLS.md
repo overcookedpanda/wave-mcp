@@ -2,7 +2,7 @@
 
 Generated from @saccolabs/wave-mcp 1.1.0 by `npm run docs`; do not edit by hand.
 
-73 tools in 13 toolsets (29 read, 44 write), 3 resources and 3 prompts.
+67 tools in 13 toolsets (29 read, 38 write), 3 resources and 3 prompts.
 Limit the toolsets with `WAVE_MCP_TOOLSETS` (comma-separated).
 
 ## Tools
@@ -73,7 +73,6 @@ Limit the toolsets with `WAVE_MCP_TOOLSETS` (comma-separated).
 | [`wave_update_invoice`](#wave_update_invoice) | write (changes or deletes) | Change an invoice. Passing items replaces every line; omit items to keep them. |
 | [`wave_clone_invoice`](#wave_clone_invoice) | write | Copy an invoice into a new draft. |
 | [`wave_approve_invoice`](#wave_approve_invoice) | write | Approve a draft invoice, which posts it to the books (status SAVED). |
-| [`wave_send_invoice`](#wave_send_invoice) | sends (irreversible) | Email an invoice through Wave to real recipients. |
 | [`wave_mark_invoice_sent`](#wave_mark_invoice_sent) | write | Record that an invoice was sent outside Wave (no email goes out). |
 | [`wave_delete_invoice`](#wave_delete_invoice) | write (changes or deletes) | Permanently delete an invoice. |
 
@@ -91,9 +90,7 @@ Limit the toolsets with `WAVE_MCP_TOOLSETS` (comma-separated).
 | [`wave_reset_estimate_acceptance`](#wave_reset_estimate_acceptance) | write | Undo the customer's acceptance so the estimate can be changed or re-accepted. |
 | [`wave_convert_estimate_to_invoice`](#wave_convert_estimate_to_invoice) | write | Create an invoice from an estimate (deposits paid carry over). |
 | [`wave_generate_estimate_pdf`](#wave_generate_estimate_pdf) | write | Generate (or regenerate) the estimate PDF and return its URL. |
-| [`wave_send_estimate_acceptance_email`](#wave_send_estimate_acceptance_email) | sends (irreversible) | Email the customer the confirmation that their estimate acceptance was recorded. |
 | [`wave_delete_estimate`](#wave_delete_estimate) | write (changes or deletes) | Permanently delete an estimate. |
-| [`wave_send_estimate`](#wave_send_estimate) | sends (irreversible) | Email an estimate through Wave to real recipients. |
 | [`wave_mark_estimate_sent`](#wave_mark_estimate_sent) | write | Record that an estimate was sent outside Wave (no email goes out). |
 
 ### payments
@@ -104,12 +101,10 @@ Limit the toolsets with `WAVE_MCP_TOOLSETS` (comma-separated).
 | [`wave_record_invoice_payment`](#wave_record_invoice_payment) | write | Record a payment received outside Wave against an invoice (cash, cheque, bank transfer...). paymentAccountId is the account the money went into (usually types=[ASSET] subtypes=[CASH_AND_BANK]). |
 | [`wave_update_invoice_payment`](#wave_update_invoice_payment) | write (changes or deletes) | Change a manually recorded invoice payment. |
 | [`wave_delete_invoice_payment`](#wave_delete_invoice_payment) | write (changes or deletes) | Delete a recorded invoice payment; the invoice becomes unpaid by that amount. |
-| [`wave_send_invoice_payment_receipt`](#wave_send_invoice_payment_receipt) | sends (irreversible) | Email a receipt for an invoice payment to real recipients. |
 | [`wave_get_estimate_payment`](#wave_get_estimate_payment) | read | One estimate deposit payment (or refund/void) with its estimate. |
 | [`wave_record_estimate_deposit`](#wave_record_estimate_deposit) | write | Record a deposit received outside Wave against an estimate. paymentAccountId is where the money went (a CASH_AND_BANK account). |
 | [`wave_update_estimate_deposit`](#wave_update_estimate_deposit) | write (changes or deletes) | Change a manually recorded estimate deposit. |
 | [`wave_delete_estimate_payment`](#wave_delete_estimate_payment) | write (changes or deletes) | Delete a recorded estimate deposit payment. |
-| [`wave_send_estimate_deposit_receipt`](#wave_send_estimate_deposit_receipt) | sends (irreversible) | Email a receipt for an estimate deposit to real recipients. |
 | [`wave_list_payments`](#wave_list_payments) | read | List money received: invoice payments and estimate deposits, newest first, with totals. |
 
 ### transactions
@@ -121,8 +116,7 @@ Limit the toolsets with `WAVE_MCP_TOOLSETS` (comma-separated).
 | [`wave_list_transactions`](#wave_list_transactions) | read | List and search the business's transactions as Wave's Transactions page shows them: bank and card transactions, expenses, deposits, transfers, bill and invoice payments. |
 | [`wave_summarize_transactions`](#wave_summarize_transactions) | read | Totals over every matching transaction, grouped by category, month, vendor, customer or bank/card account: how much was spent on Marketing this year, spend per month, top vendors. |
 | [`wave_get_transaction`](#wave_get_transaction) | read | One transaction with every line: bank/card side (anchor), category lines with order numbers, amounts, sales tax, vendor/customer, tags, review status, its current sequence, and which fields Wave allows editing. |
-| [`wave_update_transaction`](#wave_update_transaction) | sends (irreversible) | Edit a transaction as in the Wave web app: date, description, notes, reviewed (verified), bank/card account, total amount, category, vendor or customer, or the full set of split lines. |
-| [`wave_delete_transaction`](#wave_delete_transaction) | sends (irreversible) | Delete a transaction, as the web app's Delete does. |
+| [`wave_update_transaction`](#wave_update_transaction) | sends (irreversible) | Categorize a transaction as in the Wave web app: category, vendor or customer, sales tax, notes, reviewed (verified), or split it across categories (the split lines must add up to the existing total). |
 
 ### ledger
 
@@ -650,22 +644,6 @@ Approve a draft invoice, which posts it to the books (status SAVED). Does not em
 |---|---|---|---|---|
 | `invoiceId` | string | yes |  | Invoice ID |
 
-### wave_send_invoice
-
-**Email invoice** · toolset `invoices` · sends (irreversible)
-
-Email an invoice through Wave to real recipients. Irreversible: confirm recipients first. Requires email sending enabled for the business (wave_get_business emailSendEnabled).
-
-| Parameter | Type | Required | Default | Notes |
-|---|---|---|---|---|
-| `invoiceId` | string | yes |  | Invoice ID |
-| `to` | string[] | yes |  | Recipient email addresses. 1+ items, up to 20 items |
-| `subject` | string |  |  |  |
-| `message` | string |  |  |  |
-| `ccMyself` | boolean |  |  |  |
-| `fromAddress` | string |  |  | email |
-| `attachPDF` | boolean |  | true |  |
-
 ### wave_mark_invoice_sent
 
 **Mark invoice as sent** · toolset `invoices` · write
@@ -864,16 +842,6 @@ Generate (or regenerate) the estimate PDF and return its URL.
 |---|---|---|---|---|
 | `estimateId` | string | yes |  | Estimate ID |
 
-### wave_send_estimate_acceptance_email
-
-**Email estimate acceptance confirmation** · toolset `estimates` · sends (irreversible)
-
-Email the customer the confirmation that their estimate acceptance was recorded. Irreversible.
-
-| Parameter | Type | Required | Default | Notes |
-|---|---|---|---|---|
-| `estimateId` | string | yes |  | Estimate ID |
-
 ### wave_delete_estimate
 
 **Delete estimate** · toolset `estimates` · write (changes or deletes)
@@ -883,24 +851,6 @@ Permanently delete an estimate.
 | Parameter | Type | Required | Default | Notes |
 |---|---|---|---|---|
 | `estimateId` | string | yes |  | Estimate ID |
-
-### wave_send_estimate
-
-**Email estimate** · toolset `estimates` · sends (irreversible)
-
-Email an estimate through Wave to real recipients. Irreversible: confirm recipients first. The estimate must be approved.
-
-| Parameter | Type | Required | Default | Notes |
-|---|---|---|---|---|
-| `estimateId` | string | yes |  | Estimate ID |
-| `to` | string[] | yes |  | Recipient email addresses. 1+ items, up to 20 items |
-| `subject` | string |  |  |  |
-| `message` | string |  |  |  |
-| `ccMyself` | boolean |  |  |  |
-| `fromAddress` | string |  |  | email |
-| `attachPDF` | boolean |  | true |  |
-| `hideGrandTotal` | boolean |  |  |  |
-| `includeAttachments` | boolean |  |  |  |
 
 ### wave_mark_estimate_sent
 
@@ -967,23 +917,6 @@ Delete a recorded invoice payment; the invoice becomes unpaid by that amount.
 |---|---|---|---|---|
 | `id` | string | yes |  | Invoice payment ID |
 
-### wave_send_invoice_payment_receipt
-
-**Email payment receipt** · toolset `payments` · sends (irreversible)
-
-Email a receipt for an invoice payment to real recipients. Irreversible.
-
-| Parameter | Type | Required | Default | Notes |
-|---|---|---|---|---|
-| `invoiceId` | string | yes |  | Invoice ID |
-| `invoicePaymentId` | string | yes |  | Invoice payment ID |
-| `to` | string[] | yes |  | Recipient email addresses. 1+ items, up to 20 items |
-| `subject` | string |  |  |  |
-| `message` | string |  |  |  |
-| `ccMyself` | boolean |  |  |  |
-| `fromAddress` | string |  |  | email |
-| `attachPdf` | boolean |  |  |  |
-
 ### wave_get_estimate_payment
 
 **Get estimate deposit payment** · toolset `payments` · read
@@ -1035,23 +968,6 @@ Delete a recorded estimate deposit payment.
 | Parameter | Type | Required | Default | Notes |
 |---|---|---|---|---|
 | `id` | string | yes |  | Estimate payment ID |
-
-### wave_send_estimate_deposit_receipt
-
-**Email deposit receipt** · toolset `payments` · sends (irreversible)
-
-Email a receipt for an estimate deposit to real recipients. Irreversible.
-
-| Parameter | Type | Required | Default | Notes |
-|---|---|---|---|---|
-| `estimateId` | string | yes |  | Estimate ID |
-| `estimatePaymentId` | string | yes |  | Estimate payment ID |
-| `to` | string[] | yes |  | Recipient email addresses. 1+ items, up to 20 items |
-| `subject` | string |  |  |  |
-| `message` | string |  |  |  |
-| `ccMyself` | boolean |  |  |  |
-| `fromAddress` | string |  |  | email |
-| `attachPdf` | boolean |  |  |  |
 
 ### wave_list_payments
 
@@ -1155,18 +1071,14 @@ One transaction with every line: bank/card side (anchor), category lines with or
 
 **Edit transaction** · toolset `transactions` · sends (irreversible)
 
-Edit a transaction as in the Wave web app: date, description, notes, reviewed (verified), bank/card account, total amount, category, vendor or customer, or the full set of split lines. Journal entries (journalEntry: true) have no bank side: edit their lines, keeping debits equal to credits. Single-category transactions: use categoryId / vendorId / customerId / amount / salesTax directly. Split transactions: pass lines (every line to keep, with order from wave_get_transaction; omit order to add a line; lines left out are removed). Line amounts include sales tax and must add up to the amount. Reads the transaction first and sends its current sequence, so it never overwrites a newer edit. dryRun=true shows the change without saving. Confirm with the user before changing amounts or accounts. Uses Wave's web-app API (unofficial), which needs a web session: if it is missing or expired, the user runs node <package>/bin/wave-mcp.js login in a terminal on <host>.
+Categorize a transaction as in the Wave web app: category, vendor or customer, sales tax, notes, reviewed (verified), or split it across categories (the split lines must add up to the existing total). Date, description, bank/card account, total amount and journal entry lines cannot be changed by this server. Single-category transactions: use categoryId / vendorId / customerId / salesTax directly. Split transactions: pass lines (every line to keep, with order from wave_get_transaction; omit order to add a line; lines left out are removed). Line amounts include sales tax and must add up to the amount. Reads the transaction first and sends its current sequence, so it never overwrites a newer edit. dryRun=true shows the change without saving. Uses Wave's web-app API (unofficial), which needs a web session: if it is missing or expired, the user runs node <package>/bin/wave-mcp.js login in a terminal on <host>.
 
 | Parameter | Type | Required | Default | Notes |
 |---|---|---|---|---|
 | `businessId` | string |  |  | Business ID; defaults to the one wave_get_context reports |
 | `id` | string | yes |  | Transaction ID |
-| `date` | string |  |  | Date, YYYY-MM-DD |
-| `description` | string |  |  |  |
 | `notes` | string |  |  | Notes; empty string clears them |
 | `verified` | boolean |  |  | Mark as reviewed (true) or not reviewed (false) |
-| `accountId` | string |  |  | Move it to another bank/card account |
-| `amount` | number or string |  |  | New total; for split transactions also pass lines |
 | `categoryId` | string |  |  | New category account (single-category transactions) |
 | `vendorId` | string or null |  |  | Vendor ID; null clears it |
 | `customerId` | string or null |  |  | Customer ID; null clears it |
@@ -1175,18 +1087,6 @@ Edit a transaction as in the Wave web app: date, description, notes, reviewed (v
 | `lines` | object {order, accountId, amount, description, vendorId, customerId, salesTax, side}[] |  |  | 1+ items, up to 50 items |
 | `expectedSequence` | integer |  |  | Fail instead of editing if the transaction changed since you read it (sequence from wave_get_transaction). min -9007199254740991 |
 | `dryRun` | boolean |  | false |  |
-
-### wave_delete_transaction
-
-**Delete transaction** · toolset `transactions` · sends (irreversible)
-
-Delete a transaction, as the web app's Delete does. Changes the books and account balances: confirm with the user first. Wave refuses for transactions that must be removed at their source (e.g. invoice payments, payroll). Uses Wave's web-app API (unofficial), which needs a web session: if it is missing or expired, the user runs node <package>/bin/wave-mcp.js login in a terminal on <host>.
-
-| Parameter | Type | Required | Default | Notes |
-|---|---|---|---|---|
-| `businessId` | string |  |  | Business ID; defaults to the one wave_get_context reports |
-| `id` | string | yes |  |  |
-| `expectedSequence` | integer |  |  | Fail if the transaction changed since you read it. min -9007199254740991 |
 
 ### wave_import_ledger
 

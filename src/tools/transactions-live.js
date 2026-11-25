@@ -495,55 +495,75 @@ export function registerLiveTransactionTools(server, ctx) {
     },
   });
 
+  // Fields that change more than how a transaction is categorized. Refused
+  // unless WAVE_MCP_ALLOW_LEDGER_EDITS is set.
+  const allowLedgerEdits = Boolean(ctx.config.allowLedgerEdits);
+  const LEDGER_FIELDS = ['date', 'description', 'accountId', 'amount'];
+  const updateInput = z.object({
+    businessId,
+    id: z.string().min(1).describe('Transaction ID'),
+    date: date.optional(),
+    description: z.string().min(1).max(255).optional(),
+    notes: z.string().max(2000).optional().describe('Notes; empty string clears them'),
+    verified: z.boolean().optional().describe('Mark as reviewed (true) or not reviewed (false)'),
+    accountId: z.string().min(1).optional().describe('Move it to another bank/card account'),
+    amount: positiveAmount.optional().describe('New total; for split transactions also pass lines'),
+    categoryId: z.string().min(1).optional().describe('New category account (single-category transactions)'),
+    vendorId: optionalId('Vendor'),
+    customerId: optionalId('Customer'),
+    lineDescription: z.string().max(255).optional().describe('Description on the category line (single-category transactions)'),
+    salesTax: salesTaxInput,
+    lines: z
+      .array(
+        z.object({
+          order: z.number().int().min(0).optional().describe('Existing line to keep or change; omit for a new line'),
+          accountId: z.string().min(1).describe('Category account'),
+          amount: positiveAmount.describe('Line amount including its sales tax'),
+          description: z.string().max(255).optional(),
+          vendorId: optionalId('Vendor'),
+          customerId: optionalId('Customer'),
+          salesTax: salesTaxInput,
+          side: z.enum(['debit', 'credit']).optional().describe('Required for new lines on journal entries. Otherwise only for unusual lines such as a refund inside an expense; defaults to the usual side'),
+        }),
+      )
+      .min(1)
+      .max(50)
+      .optional(),
+    expectedSequence: z.number().int().optional().describe('Fail instead of editing if the transaction changed since you read it (sequence from wave_get_transaction)'),
+    dryRun: z.boolean().default(false),
+  });
+
   defineTool(server, ctx, {
     name: 'wave_update_transaction',
     title: 'Edit transaction',
     toolset: 'transactions',
     annotations: { ...UPDATE, openWorldHint: true },
     description: [
-      'Edit a transaction as in the Wave web app: date, description, notes, reviewed (verified), bank/card account, total amount, category, vendor or customer, or the full set of split lines. Journal entries (journalEntry: true) have no bank side: edit their lines, keeping debits equal to credits.',
-      'Single-category transactions: use categoryId / vendorId / customerId / amount / salesTax directly. Split transactions: pass lines (every line to keep, with order from wave_get_transaction; omit order to add a line; lines left out are removed). Line amounts include sales tax and must add up to the amount.',
-      'Reads the transaction first and sends its current sequence, so it never overwrites a newer edit. dryRun=true shows the change without saving. Confirm with the user before changing amounts or accounts.',
+      allowLedgerEdits
+        ? 'Edit a transaction as in the Wave web app: date, description, notes, reviewed (verified), bank/card account, total amount, category, vendor or customer, or the full set of split lines. Journal entries (journalEntry: true) have no bank side: edit their lines, keeping debits equal to credits.'
+        : 'Categorize a transaction as in the Wave web app: category, vendor or customer, sales tax, notes, reviewed (verified), or split it across categories (the split lines must add up to the existing total). Date, description, bank/card account, total amount and journal entry lines cannot be changed by this server.',
+      allowLedgerEdits
+        ? 'Single-category transactions: use categoryId / vendorId / customerId / amount / salesTax directly. Split transactions: pass lines (every line to keep, with order from wave_get_transaction; omit order to add a line; lines left out are removed). Line amounts include sales tax and must add up to the amount.'
+        : 'Single-category transactions: use categoryId / vendorId / customerId / salesTax directly. Split transactions: pass lines (every line to keep, with order from wave_get_transaction; omit order to add a line; lines left out are removed). Line amounts include sales tax and must add up to the amount.',
+      'Reads the transaction first and sends its current sequence, so it never overwrites a newer edit. dryRun=true shows the change without saving.',
       VIA,
     ].join(' '),
-    input: z.object({
-      businessId,
-      id: z.string().min(1).describe('Transaction ID'),
-      date: date.optional(),
-      description: z.string().min(1).max(255).optional(),
-      notes: z.string().max(2000).optional().describe('Notes; empty string clears them'),
-      verified: z.boolean().optional().describe('Mark as reviewed (true) or not reviewed (false)'),
-      accountId: z.string().min(1).optional().describe('Move it to another bank/card account'),
-      amount: positiveAmount.optional().describe('New total; for split transactions also pass lines'),
-      categoryId: z.string().min(1).optional().describe('New category account (single-category transactions)'),
-      vendorId: optionalId('Vendor'),
-      customerId: optionalId('Customer'),
-      lineDescription: z.string().max(255).optional().describe('Description on the category line (single-category transactions)'),
-      salesTax: salesTaxInput,
-      lines: z
-        .array(
-          z.object({
-            order: z.number().int().min(0).optional().describe('Existing line to keep or change; omit for a new line'),
-            accountId: z.string().min(1).describe('Category account'),
-            amount: positiveAmount.describe('Line amount including its sales tax'),
-            description: z.string().max(255).optional(),
-            vendorId: optionalId('Vendor'),
-            customerId: optionalId('Customer'),
-            salesTax: salesTaxInput,
-            side: z.enum(['debit', 'credit']).optional().describe('Required for new lines on journal entries. Otherwise only for unusual lines such as a refund inside an expense; defaults to the usual side'),
-          }),
-        )
-        .min(1)
-        .max(50)
-        .optional(),
-      expectedSequence: z.number().int().optional().describe('Fail instead of editing if the transaction changed since you read it (sequence from wave_get_transaction)'),
-      dryRun: z.boolean().default(false),
-    }),
+    // Strict, so a call that passes a refused field fails instead of having it silently dropped.
+    input: allowLedgerEdits ? updateInput : updateInput.omit(Object.fromEntries(LEDGER_FIELDS.map((k) => [k, true]))).strict(),
     handler: async (args) => {
       const bid = await ctx.resolveBusinessId(args.businessId);
+      if (!allowLedgerEdits) {
+        const refused = LEDGER_FIELDS.filter((k) => args[k] !== undefined);
+        if (refused.length) {
+          throw new WaveError(`This server only categorizes transactions; it does not change ${refused.join(', ')}. Make that change in the Wave web app.`, { code: 'NOT_ALLOWED' });
+        }
+      }
       const tx = await fetchTransaction(ctx, bid, args.id);
       if (args.expectedSequence !== undefined && args.expectedSequence !== tx.sequence) {
         throw new WaveError(`The transaction is at sequence ${tx.sequence}, not ${args.expectedSequence}: it changed since you read it. Read it again before editing.`, { code: 'STALE' });
+      }
+      if (!allowLedgerEdits && args.lines && !tx.anchorLineItem) {
+        throw new WaveError('This is a journal entry. This server only categorizes bank and card transactions; edit journal entries in the Wave web app.', { code: 'NOT_ALLOWED' });
       }
       const taxes = {};
       const taxPreview = [];
@@ -584,6 +604,8 @@ export function registerLiveTransactionTools(server, ctx) {
       );
     },
   });
+
+  if (!allowLedgerEdits) return;
 
   defineTool(server, ctx, {
     name: 'wave_delete_transaction',

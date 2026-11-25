@@ -8,3 +8,13 @@ credentials.env
 npm-debug.log*
 coverage/
 .no-credentials.env
+
+# Real books must never be committed: Wave Data Exports, statements, debug dumps
+# and local notes such as category rules.
+*.zip
+*.csv
+*.pdf
+*.ofx
+*.qfx
+local/
+dumps/

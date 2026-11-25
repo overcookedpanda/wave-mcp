@@ -22,6 +22,26 @@ export const TOOLSETS = [
   'graphql',
 ];
 
+/**
+ * Credentials may only ever be sent to Wave. Every endpoint, including any
+ * override from the environment, must be https on waveapps.com or one of its
+ * subdomains, with no port or userinfo.
+ */
+const WAVE_HOST = /(^|\.)waveapps\.com$/i;
+
+export function pinnedWaveUrl(value, name) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${name} is not a valid URL.`);
+  }
+  if (url.protocol !== 'https:' || !WAVE_HOST.test(url.hostname) || url.port || url.username || url.password) {
+    throw new Error(`${name} must be an https URL on waveapps.com (got "${url.protocol}//${url.host}"). Credentials are only sent to Wave.`);
+  }
+  return value;
+}
+
 const truthy = (v) => /^(1|true|yes|on)$/i.test(String(v ?? '').trim());
 
 function int(value, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
@@ -65,11 +85,18 @@ export function loadConfig(env = process.env) {
   return {
     credentialsFile: env.WAVE_CREDENTIALS_FILE || defaultCredentialsFile(env),
     dataDir: defaultDataDir(env),
-    apiUrl: env.WAVE_API_URL || DEFAULT_API_URL,
-    internalApiUrl: env.WAVE_INTERNAL_API_URL || DEFAULT_INTERNAL_API_URL,
-    oauthBaseUrl: (env.WAVE_OAUTH_BASE_URL || DEFAULT_OAUTH_BASE_URL).replace(/\/+$/, ''),
+    apiUrl: pinnedWaveUrl(env.WAVE_API_URL || DEFAULT_API_URL, 'WAVE_API_URL'),
+    internalApiUrl: pinnedWaveUrl(env.WAVE_INTERNAL_API_URL || DEFAULT_INTERNAL_API_URL, 'WAVE_INTERNAL_API_URL'),
+    oauthBaseUrl: pinnedWaveUrl(env.WAVE_OAUTH_BASE_URL || DEFAULT_OAUTH_BASE_URL, 'WAVE_OAUTH_BASE_URL').replace(/\/+$/, ''),
     businessId: env.WAVE_BUSINESS_ID || undefined,
     readOnly: truthy(env.WAVE_MCP_READ_ONLY),
+    // Off by default in this fork: tools that email customers.
+    allowEmail: truthy(env.WAVE_MCP_ALLOW_EMAIL),
+    // Off by default in this fork: changing a transaction's date, description,
+    // bank/card account, amount or journal lines, and deleting transactions.
+    // Categorizing (category, splits that keep the total, vendor/customer,
+    // sales tax, notes, reviewed) stays available.
+    allowLedgerEdits: truthy(env.WAVE_MCP_ALLOW_LEDGER_EDITS),
     toolsets: !toolsets || toolsets.includes('all') ? [...TOOLSETS] : toolsets,
     maxConcurrency: int(env.WAVE_MCP_MAX_CONCURRENCY, 2, { max: 8 }),
     requestTimeoutMs: int(env.WAVE_MCP_TIMEOUT_MS, 30_000, { min: 1000 }),

@@ -12,6 +12,7 @@
     "graphql",
     "pi-package"
   ],
+  "private": true,
   "type": "module",
   "main": "src/server.js",
   "bin": {

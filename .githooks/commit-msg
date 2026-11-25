@@ -1,0 +1,4 @@
+#!/bin/sh
+# Rejects commit messages that don't follow Conventional Commits.
+# Turn it on once per clone with: git config core.hooksPath .githooks
+exec node "$(git rev-parse --show-toplevel)/scripts/check-commits.mjs" --message-file "$1"

@@ -23,7 +23,16 @@ export function tempCredentials(content = `WAVE_ACCESS_TOKEN=${TOKEN}\n`) {
  */
 export async function connect(fake, { env = {}, credentials } = {}) {
   const { file } = credentials || tempCredentials();
-  const config = loadConfig({ WAVE_CREDENTIALS_FILE: file, WAVE_MCP_MAX_RETRIES: '2', WAVE_MCP_CACHE_TTL_MS: '60000', ...env });
+  // Upstream's tests cover every tool, so they run with this fork's opt-in
+  // switches on. test/hardening.test.js covers the defaults (both off).
+  const config = loadConfig({
+    WAVE_CREDENTIALS_FILE: file,
+    WAVE_MCP_MAX_RETRIES: '2',
+    WAVE_MCP_CACHE_TTL_MS: '60000',
+    WAVE_MCP_ALLOW_EMAIL: '1',
+    WAVE_MCP_ALLOW_LEDGER_EDITS: '1',
+    ...env,
+  });
   const ctx = new WaveContext({ config, env: {}, fetchImpl: fake.fetchImpl, logger: silentLogger });
   const handler = createMcpHandler(() => createServer(ctx));
   const transport = new StreamableHTTPClientTransport(new URL('http://wave.test/mcp'), { fetch: (url, init) => handler.fetch(new Request(url, init)) });
