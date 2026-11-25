@@ -13,7 +13,7 @@ export const IOPS = {};
 
 const LINE = /* GraphQL */ `
 fragment TxLineF on ClientTransactionLineItem {
-  order itemType amount description taxAction isReconciled
+  order itemType amount description taxAction isReconciled autocatCategoryStatus
   account { id name subtype { value } }
   vendor { id name }
   customer { id name }

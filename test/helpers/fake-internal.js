@@ -28,6 +28,7 @@ function line(order, account, amount, itemType, extra = {}) {
     description: '',
     taxAction: itemType === 'CREDIT' ? null : 'PAYMENT',
     isReconciled: false,
+    autocatCategoryStatus: null,
     account,
     vendor: null,
     customer: null,
@@ -37,8 +38,8 @@ function line(order, account, amount, itemType, extra = {}) {
   };
 }
 
-export function makeTx(n, { date = `2026-10-${String(n).padStart(2, '0')}`, description = `Purchase ${n}`, amount = '10.00', category = ACC.marketing, tax, verified = false } = {}) {
-  const l = line(1, category, amount, 'DEBIT');
+export function makeTx(n, { date = `2026-10-${String(n).padStart(2, '0')}`, description = `Purchase ${n}`, amount = '10.00', category = ACC.marketing, tax, verified = false, autocat = null } = {}) {
+  const l = line(1, category, amount, 'DEBIT', { autocatCategoryStatus: autocat });
   if (tax) l.taxSummary = { totalTaxAmount: dec(cents(tax.amount)), taxLiabilities: [{ accountId: GST.accountId, amount: dec(cents(tax.amount)), isTaxAmountManuallySet: Boolean(tax.manual), salesTax: GST }] };
   return {
     id: `tx-${n}`,

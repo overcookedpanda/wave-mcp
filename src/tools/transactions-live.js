@@ -37,7 +37,25 @@ function lineDetail(l) {
     customer: l.customer || undefined,
     tags: l.tags?.length ? l.tags.map((t) => t.name) : undefined,
     reconciled: l.isReconciled || undefined,
+    autoCategory: autoCategory(l.autocatCategoryStatus),
   };
+}
+
+/**
+ * Wave's own category guess on a line (autocatCategoryStatus, as the web app
+ * reads it): NOT_APPROVED means Wave picked the category and nobody has
+ * approved it yet; APPROVED once someone accepts it (which leaves the
+ * Reviewed checkmark alone). Absent when Wave didn't guess.
+ */
+function autoCategory(status) {
+  return status ? String(status).toLowerCase() : undefined;
+}
+
+/** The transaction-level status: not_approved if any line still is, else the first status seen. */
+function txAutoCategory(lines) {
+  const statuses = lines.map((l) => l.autocatCategoryStatus).filter(Boolean);
+  if (!statuses.length) return undefined;
+  return autoCategory(statuses.includes('NOT_APPROVED') ? 'NOT_APPROVED' : statuses[0]);
 }
 
 export function summarizeTransaction(tx, { full = false } = {}) {
@@ -56,6 +74,7 @@ export function summarizeTransaction(tx, { full = false } = {}) {
     customer: lines.find((l) => l.customer)?.customer?.name,
     salesTax: taxMinor ? fromMinor(taxMinor) : undefined,
     verified: tx.verificationStatus === 'VERIFIED',
+    autoCategory: txAutoCategory(lines),
     notes: tx.notes || undefined,
     source: tx.origin?.type,
     ...(tx.active === false ? { deleted: true } : {}),
@@ -331,7 +350,7 @@ export function registerLiveTransactionTools(server, ctx) {
     description: [
       "List and search the business's transactions as Wave's Transactions page shows them: bank and card transactions, expenses, deposits, transfers, bill and invoice payments. Live data.",
       'Filter by date range, text in the description, bank/card account (accountId), category accounts (categoryIds) or uncategorizedOnly. Cursor pagination: pass nextCursor back as cursor. For totals (spend per category, month, vendor or account) use wave_summarize_transactions instead of paging through rows.',
-      'Each row has the amount, direction, bank/card account, category (or categories when split), vendor, sales tax and review status. IDs work with wave_get_transaction, wave_update_transaction and wave_delete_transaction.',
+      'Each row has the amount, direction, bank/card account, category (or categories when split), vendor, sales tax and review status. autoCategory "not_approved" means Wave chose the category itself and nobody has approved it, so it may be wrong; "approved" means someone accepted the choice Wave made. Approving does not mark the transaction reviewed (verified). IDs work with wave_get_transaction, wave_update_transaction and wave_delete_transaction.',
       VIA,
     ].join(' '),
     input: z.object({
