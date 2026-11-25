@@ -34,6 +34,26 @@ Suggested start: `WAVE_MCP_READ_ONLY=1` and
 `WAVE_MCP_TOOLSETS=context,accounts,transactions,reports`, then drop
 `WAVE_MCP_READ_ONLY` once the suggested categories look right.
 
+### Commits and pull request checks
+
+Commit messages and pull request titles follow
+[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):
+`type(scope)!: summary`, where type is one of build, chore, ci, docs, feat,
+fix, perf, refactor, revert, style or test. To check messages as you commit,
+turn on the hook once per clone:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+Every pull request runs:
+
+- **ci / test:** `npm test` on Node 20, 22 and 24.
+- **ci / audit:** `npm audit --audit-level=high` on the locked dependencies.
+- **pr-checks / conventional-commits:** the PR title and every commit in it.
+- **pr-checks / dependency-review:** fails if the PR adds a dependency with a known high-severity vulnerability.
+- **codeql / analyze:** GitHub's static analysis for JavaScript; findings show under Security > Code scanning.
+
 ## What it can do
 
 | Area | Read | Write |
