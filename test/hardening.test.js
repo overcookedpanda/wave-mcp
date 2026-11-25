@@ -51,7 +51,7 @@ test('by default no email tools and no transaction delete are registered', async
   assert.ok(!names.includes('wave_match_transfer'), 'transfer matching is opt-in');
   assert.ok(!names.includes('wave_create_transfer'), 'creating transfers is opt-in');
   assert.ok(names.includes('wave_find_transfer_matches'), 'finding matches only reads');
-  assert.equal(names.length, 68);
+  assert.equal(names.length, 69);
 });
 
 test('by default edits are limited to categorizing', async (t) => {

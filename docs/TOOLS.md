@@ -2,7 +2,7 @@
 
 Generated from @saccolabs/wave-mcp 1.1.0 by `npm run docs`; do not edit by hand.
 
-68 tools in 13 toolsets (30 read, 38 write), 3 resources and 3 prompts.
+69 tools in 13 toolsets (30 read, 39 write), 3 resources and 3 prompts.
 Limit the toolsets with `WAVE_MCP_TOOLSETS` (comma-separated).
 
 ## Tools
@@ -115,6 +115,7 @@ Limit the toolsets with `WAVE_MCP_TOOLSETS` (comma-separated).
 | [`wave_create_transactions`](#wave_create_transactions) | write | Create up to 50 money transactions in one request (same shape as wave_create_transaction). |
 | [`wave_list_transactions`](#wave_list_transactions) | read | List and search the business's transactions as Wave's Transactions page shows them: bank and card transactions, expenses, deposits, transfers, bill and invoice payments. |
 | [`wave_summarize_transactions`](#wave_summarize_transactions) | read | Totals over every matching transaction, grouped by category, month, vendor, customer or bank/card account: how much was spent on Marketing this year, spend per month, top vendors. |
+| [`wave_export_transactions`](#wave_export_transactions) | write | Write every matching transaction to a CSV or JSON Lines file on this computer and return only a short summary (the file's path, row count, date range and totals), so hundreds or thousands of rows never pass through the conversation. |
 | [`wave_get_transaction`](#wave_get_transaction) | read | One transaction with every line: bank/card side (anchor), category lines with order numbers, amounts, sales tax, vendor/customer, tags, review status, its current sequence, and which fields Wave allows editing. |
 | [`wave_update_transaction`](#wave_update_transaction) | sends (irreversible) | Categorize a transaction as in the Wave web app: category, vendor or customer, sales tax, notes, reviewed (verified), or split it across categories (the split lines must add up to the existing total). |
 | [`wave_find_transfer_matches`](#wave_find_transfer_matches) | read | Which transactions Wave would pair with this one as the other side of a transfer between two of the business's bank, credit card or loan accounts, as the web app lists them under "Select Account with Matching Transaction". |
@@ -1056,6 +1057,27 @@ Totals over every matching transaction, grouped by category, month, vendor, cust
 | `source` | "MANUAL" \| "PLAID" \| "YODLEE" \| "CASHEDGE" \| "GENERIC_EXTERNAL_API" \| "RECEIPT" \| "RECEIPT_CAPTURE" \| "SHOPIFY" \| … |  |  | Where it came from: MANUAL = statement upload; PLAID/YODLEE/CASHEDGE = bank connection; GENERIC_EXTERNAL_API = API (wave_create_transaction); RECEIPT/RECEIPT_CAPTURE = receipts. Entries typed into Wave have no source |
 | `groupBy` | "category" \| "month" \| "vendor" \| "customer" \| "account" \| "none" |  | "category" | account = the bank/card account; none = totals only |
 | `maxGroups` | integer |  | 50 | Largest groups to return; the rest are added up in otherGroups. min 1, max 200 |
+
+### wave_export_transactions
+
+**Export transactions to a file** · toolset `transactions` · write
+
+Write every matching transaction to a CSV or JSON Lines file on this computer and return only a short summary (the file's path, row count, date range and totals), so hundreds or thousands of rows never pass through the conversation. Use it instead of paging wave_list_transactions to review or analyze many transactions; read or filter the file with your own tools. Same filters as wave_list_transactions. One row per transaction: id, date, description, amount, direction, account, accountId, category and categoryId (split lines joined with " | "), lines, transfer (true when it is already one side of a transfer), autoCategory, verified, reconciled, vendor, customer, salesTax, notes, source, sequence. In CSV, text that a spreadsheet would run as a formula starts with an apostrophe. Files go to the exports folder of this server's data directory (/root/.local/share/wave-mcp/exports), mode 600; fileName is a plain name, never a path. Changes nothing in Wave. Uses Wave's web-app API (unofficial), which needs a web session: if it is missing or expired, the user runs node <package>/bin/wave-mcp.js login in a terminal on <host>.
+
+| Parameter | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `businessId` | string |  |  | Business ID; defaults to the one wave_get_context reports |
+| `startDate` | string |  |  | Earliest transaction date (inclusive) |
+| `endDate` | string |  |  | Latest transaction date (inclusive) |
+| `search` | string |  |  | Text in the transaction description or a line description (case-insensitive) |
+| `accountId` | string |  |  | Bank or card account (wave_list_accounts): transactions paid from or into it. An income/expense category given here is treated as categoryIds |
+| `categoryIds` | string[] |  |  | Category accounts (income/expense, wave_list_accounts with search): transactions with a line in any of them. up to 50 items |
+| `uncategorizedOnly` | boolean |  | false | Only transactions still in Uncategorized Income/Expense |
+| `source` | "MANUAL" \| "PLAID" \| "YODLEE" \| "CASHEDGE" \| "GENERIC_EXTERNAL_API" \| "RECEIPT" \| "RECEIPT_CAPTURE" \| "SHOPIFY" \| … |  |  | Where it came from: MANUAL = statement upload; PLAID/YODLEE/CASHEDGE = bank connection; GENERIC_EXTERNAL_API = API (wave_create_transaction); RECEIPT/RECEIPT_CAPTURE = receipts. Entries typed into Wave have no source |
+| `format` | "csv" \| "jsonl" |  | "csv" |  |
+| `fileName` | string |  |  | Plain file name, no folders; default transactions-<dates>-<time> |
+| `overwrite` | boolean |  | false | Replace an existing export with the same name |
+| `maxRows` | integer |  | 20000 | Stop after this many transactions (newest first). min 1, max 50000 |
 
 ### wave_get_transaction
 

@@ -5,6 +5,7 @@ import { fromMinor, shape, toMinor } from '../format.js';
 import { HOST, cli } from '../cli.js';
 import { CREATE, DELETE, READ, UPDATE, businessId, date, defineTool, defined, detail, positiveAmount } from './common.js';
 import { accountSides } from './transactions.js';
+import { csvCell, exportDir, exportPath, writeExport } from './export-file.js';
 
 /**
  * Transactions through Wave's web-app API (unofficial, needs "wave-mcp
@@ -497,6 +498,127 @@ export function registerLiveTransactionTools(server, ctx) {
         ...(other ? { otherGroups: row(other, { groups: rest.length }) } : {}),
         ...(notes.length ? { notes } : {}),
         ...(truncated ? { truncated: `Stopped after ${seen} transactions (WAVE_MCP_SCAN_LIMIT). Narrow the dates or filters for complete totals.` } : {}),
+      };
+    },
+  });
+
+  const EXPORT_COLUMNS = [
+    ['id', false],
+    ['date', false],
+    ['description', true],
+    ['amount', false],
+    ['direction', false],
+    ['account', true],
+    ['accountId', false],
+    ['category', true],
+    ['categoryId', false],
+    ['lines', false],
+    ['transfer', false],
+    ['autoCategory', false],
+    ['verified', false],
+    ['reconciled', false],
+    ['vendor', true],
+    ['customer', true],
+    ['salesTax', false],
+    ['notes', true],
+    ['source', false],
+    ['sequence', false],
+  ];
+
+  /** One flat export row: split categories are joined with " | " in line order. */
+  const exportRow = (tx) => {
+    const lines = tx.lineItems || [];
+    const taxMinor = lines.reduce((s, l) => s + toMinor(l.taxSummary?.totalTaxAmount), 0);
+    return {
+      id: tx.id,
+      date: tx.date,
+      description: tx.description,
+      amount: money(tx.amount),
+      direction: tx.direction?.toLowerCase(),
+      account: tx.anchorLineItem?.account?.name ?? (tx.anchorLineItem ? '' : '(journal entry)'),
+      accountId: tx.anchorLineItem?.account?.id,
+      category: lines.map((l) => l.account?.name || '').join(' | '),
+      categoryId: lines.map((l) => l.account?.id || '').join(' | '),
+      lines: lines.length,
+      transfer: lines.length > 0 && lines.every((l) => l.account?.subtype?.value === 'TRANSFERS'),
+      autoCategory: txAutoCategory(lines),
+      verified: tx.verificationStatus === 'VERIFIED',
+      reconciled: Boolean(tx.anchorLineItem?.isReconciled || lines.some((l) => l.isReconciled)),
+      vendor: lines.find((l) => l.vendor)?.vendor?.name,
+      customer: lines.find((l) => l.customer)?.customer?.name,
+      salesTax: taxMinor ? fromMinor(taxMinor) : undefined,
+      notes: tx.notes || undefined,
+      source: tx.origin?.type,
+      sequence: tx.sequence,
+    };
+  };
+
+  defineTool(server, ctx, {
+    name: 'wave_export_transactions',
+    title: 'Export transactions to a file',
+    toolset: 'transactions',
+    // Writes only this server's own exports folder; never changes Wave, so it stays in read-only mode.
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    local: true,
+    description: [
+      "Write every matching transaction to a CSV or JSON Lines file on this computer and return only a short summary (the file's path, row count, date range and totals), so hundreds or thousands of rows never pass through the conversation. Use it instead of paging wave_list_transactions to review or analyze many transactions; read or filter the file with your own tools.",
+      'Same filters as wave_list_transactions. One row per transaction: id, date, description, amount, direction, account, accountId, category and categoryId (split lines joined with " | "), lines, transfer (true when it is already one side of a transfer), autoCategory, verified, reconciled, vendor, customer, salesTax, notes, source, sequence. In CSV, text that a spreadsheet would run as a formula starts with an apostrophe.',
+      `Files go to the exports folder of this server's data directory (${exportDir(ctx.config.dataDir)}), mode 600; fileName is a plain name, never a path. Changes nothing in Wave.`,
+      VIA,
+    ].join(' '),
+    input: z.object({
+      businessId,
+      ...FILTERS,
+      format: z.enum(['csv', 'jsonl']).default('csv'),
+      fileName: z.string().min(1).max(100).optional().describe('Plain file name, no folders; default transactions-<dates>-<time>'),
+      overwrite: z.boolean().default(false).describe('Replace an existing export with the same name'),
+      maxRows: z.number().int().min(1).max(50_000).default(20_000).describe('Stop after this many transactions (newest first)'),
+    }),
+    handler: async (args) => {
+      const bid = await ctx.resolveBusinessId(args.businessId);
+      const { filters, notes } = await buildFilters(ctx, bid, args);
+      let file;
+      try {
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const dates = [args.startDate, args.endDate].filter(Boolean).join('_to_') || 'all';
+        file = exportPath(ctx.config.dataDir, args.fileName ?? `transactions-${dates}-${stamp}`, args.format);
+      } catch (error) {
+        throw new WaveError(error.message, { code: 'BAD_INPUT' });
+      }
+      const rows = [];
+      let cursor, truncated = false;
+      for (;;) {
+        const conn = await listPage(ctx, bid, filters, { first: 100, after: cursor, sort: 'date_desc' });
+        for (const { node } of conn.edges) {
+          if (rows.length >= args.maxRows) {
+            truncated = true;
+            break;
+          }
+          rows.push(exportRow(node));
+        }
+        if (truncated || !conn.pageInfo?.hasNextPage || !conn.edges.length) break;
+        cursor = conn.pageInfo.endCursor;
+      }
+      const content =
+        args.format === 'csv'
+          ? [EXPORT_COLUMNS.map(([c]) => c).join(','), ...rows.map((r) => EXPORT_COLUMNS.map(([c, text]) => csvCell(r[c], { text })).join(','))].join('\r\n') + '\r\n'
+          : rows.map((r) => JSON.stringify(defined(r))).join('\n') + (rows.length ? '\n' : '');
+      try {
+        writeExport(file, content, { overwrite: args.overwrite });
+      } catch (error) {
+        throw new WaveError(error.message, { code: error.code === 'EEXIST' ? 'EXISTS' : 'WRITE_FAILED' });
+      }
+      const sum = (dir) => fromMinor(rows.filter((r) => r.direction === dir).reduce((s, r) => s + toMinor(r.amount), 0));
+      const datesSeen = rows.map((r) => r.date).sort();
+      return {
+        path: file,
+        format: args.format,
+        rows: rows.length,
+        ...(rows.length ? { firstDate: datesSeen[0], lastDate: datesSeen.at(-1) } : {}),
+        totals: { deposits: sum('deposit'), withdrawals: sum('withdrawal') },
+        filters,
+        ...(notes.length ? { notes } : {}),
+        ...(truncated ? { truncated: `Stopped at maxRows (${args.maxRows}); the file has the newest ${rows.length}. Narrow the dates or raise maxRows for the rest.` } : {}),
       };
     },
   });

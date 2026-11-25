@@ -142,6 +142,7 @@ Two ways around it:
 | Question | Call |
 |---|---|
 | Latest transactions | `wave_list_transactions` with `pageSize` |
+| Review or analyze many transactions (hundreds or more) | `wave_export_transactions` with the same filters, then read the CSV or JSON Lines file it names; don't page `wave_list_transactions` |
 | Spend on a category this year | `wave_list_accounts` (`search`), then `wave_summarize_transactions` with `categoryIds`, `startDate` and `groupBy` |
 | Uncategorized transactions | `wave_list_transactions` with `uncategorizedOnly: true` |
 | Categories Wave guessed | `wave_list_transactions`, rows with `autoCategory: "not_approved"` (Wave picked the category and nobody approved it) |

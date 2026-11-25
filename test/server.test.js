@@ -7,7 +7,7 @@ test('tool catalog: names, annotations, descriptions and schemas', async (t) => 
   const h = await connect(createFakeWave());
   t.after(h.close);
   const { tools } = await h.client.listTools();
-  assert.equal(tools.length, 76);
+  assert.equal(tools.length, 77);
   for (const tool of tools) {
     assert.match(tool.name, /^wave_[a-z_]+$/);
     assert.ok(tool.description.length > 20, `${tool.name} description`);
@@ -33,9 +33,9 @@ test('read-only mode and toolsets hide tools', async (t) => {
   const ro = await connect(createFakeWave(), { env: { WAVE_MCP_READ_ONLY: '1' } });
   t.after(ro.close);
   const { tools } = await ro.client.listTools();
-  // wave_import_ledger only writes this server's own ledger file, so it stays.
-  assert.deepEqual(tools.filter((x) => x.annotations.readOnlyHint !== true).map((x) => x.name), ['wave_import_ledger']);
-  assert.equal(tools.length, 31);
+  // These only write this server's own data folder (ledger file, exports), so they stay.
+  assert.deepEqual(tools.filter((x) => x.annotations.readOnlyHint !== true).map((x) => x.name).sort(), ['wave_export_transactions', 'wave_import_ledger']);
+  assert.equal(tools.length, 32);
   const subset = await connect(createFakeWave(), { env: { WAVE_MCP_TOOLSETS: 'context,reports' } });
   t.after(subset.close);
   const names = (await subset.client.listTools()).tools.map((x) => x.name).sort();
