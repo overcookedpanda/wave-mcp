@@ -407,3 +407,24 @@ test('an expense category passed as accountId is used as a category filter, with
   assert.equal(bank.json.filters.anchorId, 'acct-bank', 'bank accounts stay an account filter');
   assert.equal(bank.json.notes, undefined);
 });
+
+test('rows and lines show when Wave guessed the category and nobody approved it', async (t) => {
+  const h = await live(t, {
+    transactions: [
+      makeTx(1, { autocat: 'NOT_APPROVED' }),
+      makeTx(2, { autocat: 'APPROVED', verified: true }),
+      makeTx(3),
+    ],
+  });
+  const r = await h.call('wave_list_transactions', { sort: 'date_asc' });
+  assert.equal(r.isError, false, r.text);
+  const byId = Object.fromEntries(r.json.items.map((i) => [i.id, i]));
+  assert.equal(byId['tx-1'].autoCategory, 'not_approved');
+  assert.equal(byId['tx-2'].autoCategory, 'approved');
+  assert.equal('autoCategory' in byId['tx-3'], false, 'absent when Wave did not guess');
+
+  const g = await h.call('wave_get_transaction', { id: 'tx-1' });
+  assert.equal(g.isError, false, g.text);
+  assert.equal(g.json.lines[0].autoCategory, 'not_approved');
+  assert.equal(g.json.anchor.autoCategory, undefined);
+});
