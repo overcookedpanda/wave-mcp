@@ -18,7 +18,8 @@ test('stdio: the real binary handshakes (2025 era), lists tools and answers a ca
   assert.equal(client.getServerVersion().name, 'wave-mcp');
   assert.match(client.getInstructions(), /wave_get_context/);
   const { tools } = await client.listTools();
-  assert.equal(tools.length, 73);
+  // 73 upstream, minus this fork's defaults: 5 email tools and wave_delete_transaction.
+  assert.equal(tools.length, 67);
   const r = await client.callTool({ name: 'wave_get_context', arguments: {} });
   assert.equal(JSON.parse(r.content[0].text).auth.mode, 'none');
 });

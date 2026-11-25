@@ -82,6 +82,8 @@ export function defineTool(server, ctx, { name, title, description, toolset, ann
   const write = annotations.readOnlyHint === false && !local;
   if (!ctx.config.toolsets.includes(toolset)) return false;
   if (write && ctx.config.readOnly) return false;
+  // Tools that email customers stay unregistered unless WAVE_MCP_ALLOW_EMAIL is set.
+  if (!ctx.config.allowEmail && (annotations === SEND || /^wave_send_/.test(name))) return false;
   server.registerTool(
     name,
     {

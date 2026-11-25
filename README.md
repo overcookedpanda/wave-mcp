@@ -11,6 +11,29 @@ flooding its context.
 > email real customers. Transaction reads and edits use Wave's unofficial
 > web-app API, which Wave can change at any time.
 
+## This fork
+
+A hardened fork of [agustinsacco/wave-mcp](https://github.com/agustinsacco/wave-mcp),
+for categorizing transactions without giving the model more than it needs.
+Upstream behaviour is opt-in through the switches below.
+
+| Change | Default here | Opt back in |
+|---|---|---|
+| Credentials only go to Wave: `WAVE_API_URL`, `WAVE_INTERNAL_API_URL` and `WAVE_OAUTH_BASE_URL` must be `https` on `waveapps.com` or a subdomain, with no port or userinfo | always on | none |
+| Tools that email customers (`wave_send_*`) are not registered | off | `WAVE_MCP_ALLOW_EMAIL=1` |
+| `wave_update_transaction` only categorizes: category, vendor/customer, sales tax, notes, reviewed, and splits that keep the total. Date, description, bank/card account, amount and journal entry lines are refused. `wave_delete_transaction` is not registered | off | `WAVE_MCP_ALLOW_LEDGER_EDITS=1` |
+| No npm publishing: the release job is removed from CI and `package.json` is `private` | always on | none |
+| `.gitignore` also excludes exports, statements and local notes (`*.zip`, `*.csv`, `*.pdf`, `*.ofx`, `*.qfx`, `local/`, `dumps/`) | always on | none |
+
+**The web session token is your whole Wave account.** It has no scopes, so
+anything you can do in Wave it can do, until you sign out of Wave. It lives in
+`~/.config/wave-mcp/credentials.env` (mode 600). Never paste it into a chat,
+and sign out of Wave when you are done to end it.
+
+Suggested start: `WAVE_MCP_READ_ONLY=1` and
+`WAVE_MCP_TOOLSETS=context,accounts,transactions,reports`, then drop
+`WAVE_MCP_READ_ONLY` once the suggested categories look right.
+
 ## What it can do
 
 | Area | Read | Write |
