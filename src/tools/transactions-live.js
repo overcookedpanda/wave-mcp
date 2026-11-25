@@ -5,7 +5,7 @@ import { fromMinor, shape, toMinor } from '../format.js';
 import { HOST, cli } from '../cli.js';
 import { CREATE, DELETE, READ, UPDATE, businessId, date, defineTool, defined, detail, positiveAmount } from './common.js';
 import { accountSides } from './transactions.js';
-import { csvCell, exportDir, exportPath, writeExport } from './export-file.js';
+import { csvCell, exportPath, writeExport } from './export-file.js';
 
 /**
  * Transactions through Wave's web-app API (unofficial, needs "wave-mcp
@@ -563,7 +563,7 @@ export function registerLiveTransactionTools(server, ctx) {
     description: [
       "Write every matching transaction to a CSV or JSON Lines file on this computer and return only a short summary (the file's path, row count, date range and totals), so hundreds or thousands of rows never pass through the conversation. Use it instead of paging wave_list_transactions to review or analyze many transactions; read or filter the file with your own tools.",
       'Same filters as wave_list_transactions. One row per transaction: id, date, description, amount, direction, account, accountId, category and categoryId (split lines joined with " | "), lines, transfer (true when it is already one side of a transfer), autoCategory, verified, reconciled, vendor, customer, salesTax, notes, source, sequence. In CSV, text that a spreadsheet would run as a formula starts with an apostrophe.',
-      `Files go to the exports folder of this server's data directory (${exportDir(ctx.config.dataDir)}), mode 600; fileName is a plain name, never a path. Changes nothing in Wave.`,
+      `Files go to the exports folder of this server's data directory, mode 600; fileName is a plain name, never a path. Changes nothing in Wave.`,
       VIA,
     ].join(' '),
     input: z.object({
