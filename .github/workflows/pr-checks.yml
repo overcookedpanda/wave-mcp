@@ -1,0 +1,46 @@
+name: pr-checks
+# Checks that only make sense on a pull request:
+# - the PR title and every commit follow Conventional Commits
+#   (scripts/check-commits.mjs, no dependencies)
+# - no dependency the PR adds or changes has a known high-severity vulnerability
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  conventional-commits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: node scripts/check-commits.mjs --title "$PR_TITLE"
+      - name: Commits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/check-commits.mjs --range "$BASE_SHA..$HEAD_SHA"
+
+  dependency-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        with:
+          fail-on-severity: high
