@@ -19,7 +19,7 @@ test('stdio: the real binary handshakes (2025 era), lists tools and answers a ca
   assert.match(client.getInstructions(), /wave_get_context/);
   const { tools } = await client.listTools();
   // 73 upstream, minus this fork's defaults: 5 email tools and wave_delete_transaction.
-  assert.equal(tools.length, 68);
+  assert.equal(tools.length, 69);
   const r = await client.callTool({ name: 'wave_get_context', arguments: {} });
   assert.equal(JSON.parse(r.content[0].text).auth.mode, 'none');
 });
@@ -30,9 +30,9 @@ test('stdio: read-only mode via env', async (t) => {
   await client.connect(new StdioClientTransport({ command: process.execPath, args: [BIN], env: { PATH: process.env.PATH, WAVE_CREDENTIALS_FILE: file, WAVE_MCP_READ_ONLY: 'true', WAVE_MCP_LOG_LEVEL: 'silent' } }));
   t.after(() => client.close());
   const { tools } = await client.listTools();
-  // Only wave_import_ledger may write, and only to this server's own ledger file.
-  assert.deepEqual(tools.filter((x) => !x.annotations.readOnlyHint).map((x) => x.name), ['wave_import_ledger']);
-  assert.equal(tools.length, 31);
+  // Only these write, and only to this server's own data folder (ledger file, exports).
+  assert.deepEqual(tools.filter((x) => !x.annotations.readOnlyHint).map((x) => x.name).sort(), ['wave_export_transactions', 'wave_import_ledger']);
+  assert.equal(tools.length, 32);
 });
 
 async function httpServer(t, credentials, env = {}) {
@@ -65,7 +65,7 @@ test('http: bearer token is enforced when configured', async (t) => {
   assert.equal((await fetch(`${base}/mcp`, { ...init, headers: { ...init.headers, Authorization: 'Bearer wrong' } })).status, 401);
   const client = new Client({ name: 'http-test', version: '1.0.0' });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: 'Bearer s3cret-value' } } }));
-  assert.equal((await client.listTools()).tools.length, 68); // fork defaults: no email tools, no delete, no transfer matching
+  assert.equal((await client.listTools()).tools.length, 69); // fork defaults: no email tools, no delete, no transfer matching
   await client.close();
 });
 

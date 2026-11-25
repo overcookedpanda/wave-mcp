@@ -547,3 +547,49 @@ test('create transfer refuses a duplicate side, an account Wave does not offer, 
   }
   assert.equal(patches(h.internal).length, 0);
 });
+
+test('export: every matching transaction goes to a file, only a summary comes back', async (t) => {
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wave-mcp-export-'));
+  const txs = [
+    ...Array.from({ length: 230 }, (_, i) => makeTx(i + 1, { date: `2026-0${1 + (i % 9)}-${String(1 + (i % 28)).padStart(2, '0')}`, description: i === 0 ? '=HYPERLINK("x")' : `Purchase, "${i + 1}"`, amount: '10.00', autocat: i % 2 ? 'NOT_APPROVED' : null })),
+    makeTx(999, { date: '2026-10-01', amount: '5.00', anchor: ACC.card, direction: 'DEPOSIT', category: ACC.sales }),
+  ];
+  const internal = createFakeInternal({ transactions: txs });
+  const h = await connect(combineFakes(createFakeWave(), internal), { credentials: tempCredentials(BOTH), env: { WAVE_BUSINESS_ID: BUSINESS.id, WAVE_MCP_DATA_DIR: dataDir, WAVE_MCP_READ_ONLY: '1' } });
+  t.after(h.close);
+
+  const r = await h.call('wave_export_transactions', { fileName: 'all-2026' });
+  assert.equal(r.isError, false, r.text);
+  assert.equal(r.json.rows, 231);
+  assert.equal(r.json.path, path.join(dataDir, 'exports', 'all-2026.csv'));
+  assert.deepEqual(r.json.totals, { deposits: '5.00', withdrawals: '2300.00' });
+  assert.ok(r.text.length < 1000, 'no rows in the response');
+  assert.equal(fs.statSync(r.json.path).mode & 0o777, 0o600);
+  const lines = fs.readFileSync(r.json.path, 'utf8').trimEnd().split('\r\n');
+  assert.equal(lines.length, 232);
+  assert.match(lines[0], /^id,date,description,amount,direction,account,accountId,category,categoryId,lines,transfer,autoCategory/);
+  assert.ok(lines.some((l) => l.includes(`"'=HYPERLINK(""x"")"`)), 'formula text is defused and quoted');
+  assert.ok(lines.some((l) => l.startsWith('tx-2,') && l.includes('"Purchase, ""2"""') && l.includes(',not_approved,')));
+  assert.equal(internal.calls.filter((c) => c.name === 'TransactionPatch').length, 0);
+
+  const j = await h.call('wave_export_transactions', { format: 'jsonl', accountId: ACC.card.id, fileName: 'card' });
+  assert.equal(j.json.rows, 1);
+  const row = JSON.parse(fs.readFileSync(j.json.path, 'utf8').trim());
+  assert.deepEqual([row.id, row.direction, row.account, row.category, row.transfer], ['tx-999', 'deposit', 'Visa', 'Sales', false]);
+
+  const capped = await h.call('wave_export_transactions', { maxRows: 50, fileName: 'capped', format: 'jsonl' });
+  assert.equal(capped.json.rows, 50);
+  assert.match(capped.json.truncated, /maxRows/);
+
+  const again = await h.call('wave_export_transactions', { fileName: 'all-2026' });
+  assert.equal(again.isError, true);
+  assert.match(again.text, /already exists/);
+  for (const bad of ['../escape', 'sub/dir', '/etc/passwd', '.hidden', 'a\\b']) {
+    const x = await h.call('wave_export_transactions', { fileName: bad });
+    assert.equal(x.isError, true, bad);
+    assert.match(x.text, /plain file name/, bad);
+  }
+  assert.deepEqual(fs.readdirSync(path.join(dataDir, 'exports')).sort(), ['all-2026.csv', 'capped.jsonl', 'card.jsonl']);
+});
