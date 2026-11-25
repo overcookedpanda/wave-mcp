@@ -8,7 +8,7 @@ import { ACC, SESSION, combineFakes, createFakeInternal, makeTx } from './helper
 import { loadConfig, pinnedWaveUrl } from '../src/config.js';
 
 const BOTH = `WAVE_ACCESS_TOKEN=${TOKEN}\nWAVE_SESSION_TOKEN=${SESSION}\n`;
-const DEFAULTS = { WAVE_MCP_ALLOW_EMAIL: '', WAVE_MCP_ALLOW_LEDGER_EDITS: '' };
+const DEFAULTS = { WAVE_MCP_ALLOW_EMAIL: '', WAVE_MCP_ALLOW_LEDGER_EDITS: '', WAVE_MCP_ALLOW_TRANSFERS: '' };
 
 async function hardened(t, { transactions } = {}) {
   const internal = createFakeInternal(transactions ? { transactions } : {});
@@ -39,6 +39,7 @@ test('endpoints are pinned to https on waveapps.com', () => {
   const config = loadConfig({});
   assert.equal(config.allowEmail, false);
   assert.equal(config.allowLedgerEdits, false);
+  assert.equal(config.allowTransfers, false);
 });
 
 test('by default no email tools and no transaction delete are registered', async (t) => {
@@ -47,7 +48,10 @@ test('by default no email tools and no transaction delete are registered', async
   assert.deepEqual(names.filter((n) => /^wave_send_/.test(n)), []);
   assert.ok(!names.includes('wave_delete_transaction'));
   assert.ok(names.includes('wave_update_transaction'));
-  assert.equal(names.length, 67);
+  assert.ok(!names.includes('wave_match_transfer'), 'transfer matching is opt-in');
+  assert.ok(!names.includes('wave_create_transfer'), 'creating transfers is opt-in');
+  assert.ok(names.includes('wave_find_transfer_matches'), 'finding matches only reads');
+  assert.equal(names.length, 68);
 });
 
 test('by default edits are limited to categorizing', async (t) => {
@@ -87,4 +91,14 @@ test('by default journal entry lines cannot be edited', async (t) => {
   assert.equal(r.isError, true);
   assert.match(r.text, /journal entr/i);
   assert.equal(patches(h.internal).length, 0);
+});
+
+test('by default the transfer finder says what recording a transfer needs', async (t) => {
+  const txs = [makeTx(1, { date: '2026-11-16', amount: '28.00', category: ACC.uncat })];
+  const h = await hardened(t, { transactions: txs });
+  const r = await h.call('wave_find_transfer_matches', { id: 'tx-1' });
+  assert.equal(r.isError, false, r.text);
+  assert.equal(r.json.matchesFound, 0);
+  assert.equal(r.json.createTransferAccountsFound, 2);
+  assert.match(r.json.note, /does not offer it: it needs WAVE_MCP_ALLOW_TRANSFERS=1 and WAVE_MCP_READ_ONLY off/);
 });

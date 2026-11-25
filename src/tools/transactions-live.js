@@ -3,7 +3,7 @@ import { IOPS } from '../wave/internal-operations.js';
 import { WaveApiError, WaveError, WaveInputError, describeInternalInputErrors } from '../wave/errors.js';
 import { fromMinor, shape, toMinor } from '../format.js';
 import { HOST, cli } from '../cli.js';
-import { DELETE, READ, UPDATE, businessId, date, defineTool, defined, detail, positiveAmount } from './common.js';
+import { CREATE, DELETE, READ, UPDATE, businessId, date, defineTool, defined, detail, positiveAmount } from './common.js';
 import { accountSides } from './transactions.js';
 
 /**
@@ -623,6 +623,258 @@ export function registerLiveTransactionTools(server, ctx) {
       );
     },
   });
+
+  // ------------------------------------------------------------ transfers
+
+  /** The one category line of a bank/card transaction, or a reason it has none. */
+  function transferLine(tx) {
+    if (!tx.anchorLineItem) return { why: 'it is a journal entry with no bank or card side' };
+    const lines = tx.lineItems || [];
+    if (lines.length !== 1) return { why: `it is split across ${lines.length} categories` };
+    return { line: lines[0] };
+  }
+
+  /**
+   * Ask Wave which transactions it would pair with this one as a transfer,
+   * exactly as the web app's category menu does. Wave picks them (same
+   * amount, opposite direction, another bank/card/loan account, nearby date).
+   */
+  async function waveTransferMatches(bid, tx, line) {
+    // The web app loads the transfer choices separately, when the Transfer
+    // group is opened (TRANSFER_CATEGORY_SUBGROUP); the default list only
+    // has their headings. Fall back to the default list if that is empty.
+    const ask = (groupFilter) =>
+      ctx.internal.request(IOPS.TransactionCategories, {
+        businessId: bid,
+        input: {
+          transactionDate: tx.date,
+          direction: tx.direction,
+          transactionType: 'ANCHOR',
+          lineItemCategory: category(line.account?.id),
+          anchorId: tx.anchorLineItem.account?.id,
+          anchorItemType: tx.anchorLineItem.itemType,
+          isTransactionMultiLine: false,
+          transactionAmount: fromMinor(toMinor(tx.amount)),
+          lineItemItemType: line.itemType,
+          groupFilter,
+        },
+      });
+    const pick = (data) => {
+      const all = data.transactionCategories?.categories || [];
+      return {
+        matches: all.filter((c) => c.type === 'MATCHING_TRANSFER' && c.transactionId),
+        accounts: all.filter((c) => c.type === 'CREATE_TRANSFER' && c.accountId),
+      };
+    };
+    const found = pick(await ask('TRANSFER_CATEGORY_SUBGROUP'));
+    if (found.matches.length || found.accounts.length) return found;
+    return pick(await ask('DEFAULT_CATEGORY_SUBGROUP'));
+  }
+
+  // Whether the tools that record a transfer are registered in this server.
+  const canRecordTransfers = Boolean(ctx.config.allowTransfers) && !ctx.config.readOnly;
+  const recordWith = (tool, what) =>
+    canRecordTransfers ? `${tool} records ${what}.` : `${tool} can record ${what}, but this server does not offer it: it needs WAVE_MCP_ALLOW_TRANSFERS=1 and WAVE_MCP_READ_ONLY off. Otherwise record it in the Wave web app.`;
+
+  /** Reconciled statement periods that recording a change in this account on this date would disturb. */
+  async function reconciliationImpact(bid, accountId, txDate) {
+    const data = await ctx.internal.request(IOPS.DoesImpactReconciliation, { businessId: bid, changes: [{ accountId, transactionDate: txDate }] });
+    return data.business?.doesImpactReconciliation || [];
+  }
+
+  const daysApart = (a, b) => Math.round(Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86_400_000);
+  const isTransfer = (line) => line?.account?.subtype?.value === 'TRANSFERS';
+  const side = (tx) => ({ ...summarizeTransaction(tx), sequence: tx.sequence });
+
+  defineTool(server, ctx, {
+    name: 'wave_find_transfer_matches',
+    title: 'Find transfer matches',
+    toolset: 'transactions',
+    annotations: { ...READ, openWorldHint: true },
+    description: `Which transactions Wave would pair with this one as the other side of a transfer between two of the business's bank, credit card or loan accounts, as the web app lists them under "Select Account with Matching Transaction". Wave chooses the candidates (same amount, opposite direction, another account, nearby date). Returns each candidate with its date, amount, account and current category, plus createTransferAccounts: the accounts Wave offers under "Select Account to Create Transfer" when there is no other side to match. Changes nothing. ${VIA}`,
+    input: z.object({ businessId, id: z.string().min(1).describe('Transaction ID from wave_list_transactions') }),
+    handler: async ({ businessId: b, id }) => {
+      const bid = await ctx.resolveBusinessId(b);
+      const tx = await fetchTransaction(ctx, bid, id);
+      const { line, why } = transferLine(tx);
+      if (!line) return shape({ transaction: side(tx), matches: [], note: `Wave cannot match this transaction as a transfer here: ${why}.` }, 'full');
+      if (isTransfer(line)) return shape({ transaction: side(tx), matches: [], note: 'This transaction is already one side of a transfer.' }, 'full');
+      const { matches: found, accounts } = await waveTransferMatches(bid, tx, line);
+      const matches = [];
+      for (const c of found.slice(0, 10)) {
+        const other = await fetchTransaction(ctx, bid, c.transactionId).catch(() => undefined);
+        matches.push({
+          id: c.transactionId,
+          label: c.label,
+          ...(other ? { ...side(other), daysApart: daysApart(tx.date, other.date) } : {}),
+        });
+      }
+      return shape(
+        {
+          transaction: side(tx),
+          matches,
+          matchesFound: found.length,
+          ...(found.length > matches.length ? { moreMatches: found.length - matches.length } : {}),
+          createTransferAccountsFound: accounts.length,
+          createTransferAccounts: accounts.map((c) => ({ accountId: c.accountId, name: c.label })),
+          note: matches.length
+            ? recordWith('wave_match_transfer', 'one of these matches')
+            : accounts.length
+              ? `Wave lists no matching transaction for this one. If the other account gets its own copy from a bank or card feed, wait for it to import. If it has no feed, such as a loan, ${recordWith('wave_create_transfer', 'the transfer into one of createTransferAccounts')}`
+              : 'Wave lists no matching transaction and offers no account to create a transfer into. Check that the other account exists in Wave (wave_list_accounts, e.g. subtypes [CREDIT_CARD] or [LOANS]).',
+        },
+        'full',
+      );
+    },
+  });
+
+  if (ctx.config.allowTransfers) {
+    defineTool(server, ctx, {
+      name: 'wave_match_transfer',
+      title: 'Match transfer',
+      toolset: 'transactions',
+      annotations: { ...UPDATE, openWorldHint: true },
+      description: [
+        'Record two transactions as the two sides of one transfer between the business\'s own bank, credit card or loan accounts (for example a card payment from checking and the payment received on the card), as the web app does when you pick "Select Account with Matching Transaction". Wave moves both category lines to a new Transfer Clearing account, so both transactions lose their current category.',
+        'Only pairs transactions that Wave itself lists as matches (wave_find_transfer_matches), each with a single category line and nothing reconciled. It does not create a missing other side. Reads both transactions first and sends their current sequences. dryRun=true checks everything and shows both sides without saving.',
+        VIA,
+      ].join(' '),
+      input: z.object({
+        businessId,
+        id: z.string().min(1).describe('One side of the transfer'),
+        matchId: z.string().min(1).describe('The other side, from wave_find_transfer_matches'),
+        dryRun: z.boolean().default(false),
+      }),
+      handler: async ({ businessId: b, id, matchId, dryRun }) => {
+        const bid = await ctx.resolveBusinessId(b);
+        if (id === matchId) throw new WaveError('A transaction cannot be matched with itself.', { code: 'BAD_INPUT' });
+        const [tx, other] = [await fetchTransaction(ctx, bid, id), await fetchTransaction(ctx, bid, matchId)];
+        const refuse = (msg) => {
+          throw new WaveError(`Not matched: ${msg}`, { code: 'NOT_A_MATCH' });
+        };
+        const a = transferLine(tx);
+        const o = transferLine(other);
+        if (!a.line) refuse(`${tx.id} cannot be a transfer side because ${a.why}.`);
+        if (!o.line) refuse(`${other.id} cannot be a transfer side because ${o.why}.`);
+        for (const [t, l] of [
+          [tx, a.line],
+          [other, o.line],
+        ]) {
+          if (isTransfer(l)) refuse(`${t.id} ("${t.description}") is already one side of a transfer.`);
+          if (l.isReconciled || t.anchorLineItem.isReconciled) refuse(`${t.id} ("${t.description}") is reconciled. Unreconcile it in the Wave web app first if it really is part of this transfer.`);
+          if (t.detailActions?.category === false) refuse(`Wave does not allow changing the category of ${t.id} ("${t.description}").`);
+        }
+        if (tx.anchorLineItem.account?.id === other.anchorLineItem.account?.id) refuse('both transactions are in the same account; a transfer moves money between two accounts.');
+        if (tx.direction === other.direction) refuse(`both transactions are ${tx.direction.toLowerCase()}s; a transfer has one withdrawal and one deposit.`);
+        if (toMinor(tx.amount) !== toMinor(other.amount)) refuse(`the amounts differ (${money(tx.amount)} and ${money(other.amount)}).`);
+        if (tx.currency?.code !== other.currency?.code) refuse(`the currencies differ (${tx.currency?.code} and ${other.currency?.code}).`);
+        const listed = (await waveTransferMatches(bid, tx, a.line)).matches.find((c) => c.transactionId === other.id);
+        if (!listed) refuse(`Wave does not list ${other.id} ("${other.description}") as a matching transfer for ${tx.id}. wave_find_transfer_matches shows the ones it does.`);
+        if (listed.transactionSequence !== other.sequence) {
+          throw new WaveError('The other transaction changed since Wave listed it. Run wave_find_transfer_matches again and retry.', { code: 'STALE' });
+        }
+        const input = {
+          id: tx.id,
+          sequence: tx.sequence,
+          errorIfReconciliationIsImpacted: true,
+          lineItems: [
+            {
+              order: a.line.order,
+              category: { type: 'MATCHING_TRANSFER', transactionId: other.id, transactionSequence: other.sequence, lineItemOrder: listed.lineItemOrder ?? o.line.order },
+            },
+          ],
+        };
+        const days = daysApart(tx.date, other.date);
+        const replaced = [
+          { id: tx.id, category: a.line.account?.name },
+          { id: other.id, category: o.line.account?.name },
+        ];
+        if (dryRun) {
+          return shape({ dryRun: true, wouldMatch: [side(tx), side(other)], daysApart: days, categoriesReplaced: replaced, label: listed.label, input }, 'full');
+        }
+        const payload = await write(ctx, IOPS.TransactionPatch, input, 'transactionPatch');
+        const after = await fetchTransaction(ctx, bid, other.id).catch(() => undefined);
+        const sides = [payload.transaction, after].filter(Boolean);
+        const ok = sides.length === 2 && sides.every((t) => isTransfer(t.lineItems?.[0]));
+        return shape(
+          {
+            ok,
+            matched: sides.map(side),
+            categoriesReplaced: replaced,
+            ...(ok ? {} : { warning: 'Wave accepted the change, but both sides do not show as a transfer yet. Check them with wave_get_transaction.' }),
+          },
+          'full',
+        );
+      },
+    });
+
+    defineTool(server, ctx, {
+      name: 'wave_create_transfer',
+      title: 'Create transfer',
+      toolset: 'transactions',
+      annotations: { ...CREATE, openWorldHint: true },
+      description: [
+        'Record a transaction as a transfer to or from another of the business\'s own accounts that has no matching transaction to pair it with, such as a loan payment to a loan account with no bank feed. Wave adds the other side in that account and moves the category line to a new Transfer Clearing account, as the web app does when you pick "Select Account to Create Transfer".',
+        'If the other account will get its own copy of the transaction (a bank or card feed), use wave_match_transfer once it arrives instead, or it is counted twice. accountId must be one of the createTransferAccounts that wave_find_transfer_matches lists. Refuses when Wave already lists a matching transaction in that account, and when Wave says the change would disturb a reconciled statement period. dryRun=true runs every check, Wave\'s reconciliation check included, without saving.',
+        VIA,
+      ].join(' '),
+      input: z.object({
+        businessId,
+        id: z.string().min(1).describe('The transaction to record as a transfer'),
+        accountId: z.string().min(1).describe('The other account, from createTransferAccounts in wave_find_transfer_matches'),
+        dryRun: z.boolean().default(false),
+      }),
+      handler: async ({ businessId: b, id, accountId, dryRun }) => {
+        const bid = await ctx.resolveBusinessId(b);
+        const tx = await fetchTransaction(ctx, bid, id);
+        const refuse = (msg) => {
+          throw new WaveError(`Not recorded: ${msg}`, { code: 'NOT_A_TRANSFER' });
+        };
+        const { line, why } = transferLine(tx);
+        if (!line) refuse(`${tx.id} cannot be a transfer side because ${why}.`);
+        if (isTransfer(line)) refuse(`${tx.id} ("${tx.description}") is already one side of a transfer.`);
+        if (line.isReconciled || tx.anchorLineItem.isReconciled) refuse(`${tx.id} ("${tx.description}") is reconciled. Unreconcile it in the Wave web app first if it really is a transfer.`);
+        if (tx.detailActions?.category === false) refuse(`Wave does not allow changing the category of ${tx.id} ("${tx.description}").`);
+        if (accountId === tx.anchorLineItem.account?.id) refuse('that is the account this transaction is already in.');
+        const { matches, accounts } = await waveTransferMatches(bid, tx, line);
+        const target = accounts.find((c) => c.accountId === accountId);
+        if (!target) refuse(`Wave does not offer ${accountId} as an account to transfer to for this transaction. wave_find_transfer_matches lists the ones it does.`);
+        const existing = [];
+        for (const m of matches) {
+          const other = await fetchTransaction(ctx, bid, m.transactionId).catch(() => undefined);
+          if (other?.anchorLineItem?.account?.id === accountId) existing.push(other);
+        }
+        if (existing.length) refuse(`Wave already lists ${existing.map((t) => `${t.id} ("${t.description}", ${t.date})`).join(', ')} in ${target.label} as the other side. Use wave_match_transfer so it is not counted twice.`);
+        const impact = await reconciliationImpact(bid, accountId, tx.date);
+        if (impact.length) {
+          throw new WaveError(`Not recorded: adding the other side to ${target.label} on ${tx.date} would change a reconciled statement period there (${impact.map((i) => i.impactType).join(', ')}). Check that account's reconciliation in the Wave web app first.`, { code: 'RECONCILED', details: impact });
+        }
+        const input = {
+          id: tx.id,
+          sequence: tx.sequence,
+          errorIfReconciliationIsImpacted: true,
+          lineItems: [{ order: line.order, category: { type: 'CREATE_TRANSFER', accountId }, taxAction: null }],
+        };
+        if (dryRun) {
+          return shape({ dryRun: true, transaction: side(tx), to: target.label, categoryReplaced: line.account?.name, reconciliationImpact: 'none', input }, 'full');
+        }
+        const payload = await write(ctx, IOPS.TransactionPatch, input, 'transactionPatch');
+        const createdId = payload.sideEffects?.find((s) => s.id !== tx.id)?.id;
+        const created = createdId ? await fetchTransaction(ctx, bid, createdId).catch(() => undefined) : undefined;
+        const ok = isTransfer(payload.transaction?.lineItems?.[0]) && Boolean(created);
+        return shape(
+          {
+            ok,
+            transaction: side(payload.transaction),
+            otherSide: created ? side(created) : createdId,
+            categoryReplaced: line.account?.name,
+            ...(ok ? {} : { warning: 'Wave accepted the change, but the transfer does not show both sides yet. Check it with wave_get_transaction and in the other account.' }),
+          },
+          'full',
+        );
+      },
+    });
+  }
 
   if (!allowLedgerEdits) return;
 

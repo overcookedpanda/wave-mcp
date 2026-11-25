@@ -76,6 +76,32 @@ query SalesTaxSummary($businessId: ID!, $input: SalesTaxSummaryInput) {
   }
 }`;
 
+/**
+ * The category choices the web app offers for one line, including other
+ * transactions it would pair as the other side of a transfer
+ * (type MATCHING_TRANSFER, with that transaction's id, sequence and line
+ * order). Verified against the web app's ListCategories request on 2026-11-25.
+ */
+IOPS.TransactionCategories = /* GraphQL */ `
+query TransactionCategories($businessId: ID!, $input: TransactionCategoriesInput!) {
+  transactionCategories(businessId: $businessId, input: $input) {
+    categories { label type accountId transactionId transactionSequence lineItemOrder categorizationSubGroupValue }
+  }
+}`;
+
+/**
+ * Whether changing a transaction in an account on a date would disturb a
+ * reconciled statement period, as the web app asks before recording a
+ * transfer. Verified against the web app's request on 2026-11-25.
+ */
+IOPS.DoesImpactReconciliation = /* GraphQL */ `
+query DoesImpactReconciliation($businessId: ID!, $changes: [TransactionChangesForReconciliationImpact!]!) {
+  business(id: $businessId) {
+    id
+    doesImpactReconciliation(changes: $changes) { impactType periodId transactionId lineItemOrder }
+  }
+}`;
+
 IOPS.TransactionPatch = /* GraphQL */ `
 mutation TransactionPatch($input: TransactionPatchInput!) {
   transactionPatch(input: $input) {

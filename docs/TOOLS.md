@@ -2,7 +2,7 @@
 
 Generated from @saccolabs/wave-mcp 1.1.0 by `npm run docs`; do not edit by hand.
 
-67 tools in 13 toolsets (29 read, 38 write), 3 resources and 3 prompts.
+68 tools in 13 toolsets (30 read, 38 write), 3 resources and 3 prompts.
 Limit the toolsets with `WAVE_MCP_TOOLSETS` (comma-separated).
 
 ## Tools
@@ -117,6 +117,7 @@ Limit the toolsets with `WAVE_MCP_TOOLSETS` (comma-separated).
 | [`wave_summarize_transactions`](#wave_summarize_transactions) | read | Totals over every matching transaction, grouped by category, month, vendor, customer or bank/card account: how much was spent on Marketing this year, spend per month, top vendors. |
 | [`wave_get_transaction`](#wave_get_transaction) | read | One transaction with every line: bank/card side (anchor), category lines with order numbers, amounts, sales tax, vendor/customer, tags, review status, its current sequence, and which fields Wave allows editing. |
 | [`wave_update_transaction`](#wave_update_transaction) | sends (irreversible) | Categorize a transaction as in the Wave web app: category, vendor or customer, sales tax, notes, reviewed (verified), or split it across categories (the split lines must add up to the existing total). |
+| [`wave_find_transfer_matches`](#wave_find_transfer_matches) | read | Which transactions Wave would pair with this one as the other side of a transfer between two of the business's bank, credit card or loan accounts, as the web app lists them under "Select Account with Matching Transaction". |
 
 ### ledger
 
@@ -1087,6 +1088,17 @@ Categorize a transaction as in the Wave web app: category, vendor or customer, s
 | `lines` | object {order, accountId, amount, description, vendorId, customerId, salesTax, side}[] |  |  | 1+ items, up to 50 items |
 | `expectedSequence` | integer |  |  | Fail instead of editing if the transaction changed since you read it (sequence from wave_get_transaction). min -9007199254740991 |
 | `dryRun` | boolean |  | false |  |
+
+### wave_find_transfer_matches
+
+**Find transfer matches** · toolset `transactions` · read
+
+Which transactions Wave would pair with this one as the other side of a transfer between two of the business's bank, credit card or loan accounts, as the web app lists them under "Select Account with Matching Transaction". Wave chooses the candidates (same amount, opposite direction, another account, nearby date). Returns each candidate with its date, amount, account and current category, plus createTransferAccounts: the accounts Wave offers under "Select Account to Create Transfer" when there is no other side to match. Changes nothing. Uses Wave's web-app API (unofficial), which needs a web session: if it is missing or expired, the user runs node <package>/bin/wave-mcp.js login in a terminal on <host>.
+
+| Parameter | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `businessId` | string |  |  | Business ID; defaults to the one wave_get_context reports |
+| `id` | string | yes |  | Transaction ID from wave_list_transactions |
 
 ### wave_import_ledger
 

@@ -24,13 +24,14 @@ export function tempCredentials(content = `WAVE_ACCESS_TOKEN=${TOKEN}\n`) {
 export async function connect(fake, { env = {}, credentials } = {}) {
   const { file } = credentials || tempCredentials();
   // Upstream's tests cover every tool, so they run with this fork's opt-in
-  // switches on. test/hardening.test.js covers the defaults (both off).
+  // switches on. test/hardening.test.js covers the defaults (all off).
   const config = loadConfig({
     WAVE_CREDENTIALS_FILE: file,
     WAVE_MCP_MAX_RETRIES: '2',
     WAVE_MCP_CACHE_TTL_MS: '60000',
     WAVE_MCP_ALLOW_EMAIL: '1',
     WAVE_MCP_ALLOW_LEDGER_EDITS: '1',
+    WAVE_MCP_ALLOW_TRANSFERS: '1',
     ...env,
   });
   const ctx = new WaveContext({ config, env: {}, fetchImpl: fake.fetchImpl, logger: silentLogger });

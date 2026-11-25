@@ -97,6 +97,9 @@ export function loadConfig(env = process.env) {
     // Categorizing (category, splits that keep the total, vendor/customer,
     // sales tax, notes, reviewed) stays available.
     allowLedgerEdits: truthy(env.WAVE_MCP_ALLOW_LEDGER_EDITS),
+    // Off by default in this fork: pairing two transactions as the two sides of
+    // a transfer (wave_match_transfer). It recategorizes both transactions.
+    allowTransfers: truthy(env.WAVE_MCP_ALLOW_TRANSFERS),
     toolsets: !toolsets || toolsets.includes('all') ? [...TOOLSETS] : toolsets,
     maxConcurrency: int(env.WAVE_MCP_MAX_CONCURRENCY, 2, { max: 8 }),
     requestTimeoutMs: int(env.WAVE_MCP_TIMEOUT_MS, 30_000, { min: 1000 }),
