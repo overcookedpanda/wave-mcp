@@ -145,6 +145,7 @@ Two ways around it:
 | Spend on a category this year | `wave_list_accounts` (`search`), then `wave_summarize_transactions` with `categoryIds`, `startDate` and `groupBy` |
 | Uncategorized transactions | `wave_list_transactions` with `uncategorizedOnly: true` |
 | Categories Wave guessed | `wave_list_transactions`, rows with `autoCategory: "not_approved"` (Wave picked the category and nobody approved it) |
+| Is this a transfer between my own accounts | `wave_find_transfer_matches` with the transaction ID; to record it, `wave_match_transfer` (needs `WAVE_MCP_ALLOW_TRANSFERS=1`) with `dryRun: true` first. Never pick a "Transfer Clearing" account as a category: each transfer gets its own, made by the match |
 | Cash, balances, do the books balance | `wave_run_report` (`balance_sheet`, `trial_balance`) |
 | Who owes me, overdue invoices | `wave_run_report` (`aged_receivables`) or `wave_list_invoices` |
 

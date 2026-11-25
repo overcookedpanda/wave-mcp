@@ -8,6 +8,7 @@
 export const SESSION = 'sess-token';
 export const ACC = {
   cash: { id: 'acc-cash', name: 'Cash on Hand', subtype: { value: 'CASH_AND_BANK' } },
+  card: { id: 'acc-card', name: 'Visa', subtype: { value: 'CREDIT_CARD' } },
   uncat: { id: 'acc-uncat', name: 'Uncategorized Expense', subtype: { value: 'UNCATEGORIZED_EXPENSE' } },
   uncatIncome: { id: 'acc-uncat-in', name: 'Uncategorized Income', subtype: { value: 'UNCATEGORIZED_INCOME' } },
   marketing: { id: 'acc-mkt', name: 'Marketing', subtype: { value: 'EXPENSE' } },
@@ -38,8 +39,9 @@ function line(order, account, amount, itemType, extra = {}) {
   };
 }
 
-export function makeTx(n, { date = `2026-10-${String(n).padStart(2, '0')}`, description = `Purchase ${n}`, amount = '10.00', category = ACC.marketing, tax, verified = false, autocat = null } = {}) {
-  const l = line(1, category, amount, 'DEBIT', { autocatCategoryStatus: autocat });
+export function makeTx(n, { date = `2026-10-${String(n).padStart(2, '0')}`, description = `Purchase ${n}`, amount = '10.00', category = ACC.marketing, tax, verified = false, autocat = null, anchor = ACC.cash, direction = 'WITHDRAWAL', reconciled = false } = {}) {
+  const deposit = direction === 'DEPOSIT';
+  const l = line(1, category, amount, deposit ? 'CREDIT' : 'DEBIT', { autocatCategoryStatus: autocat });
   if (tax) l.taxSummary = { totalTaxAmount: dec(cents(tax.amount)), taxLiabilities: [{ accountId: GST.accountId, amount: dec(cents(tax.amount)), isTaxAmountManuallySet: Boolean(tax.manual), salesTax: GST }] };
   return {
     id: `tx-${n}`,
@@ -48,14 +50,14 @@ export function makeTx(n, { date = `2026-10-${String(n).padStart(2, '0')}`, desc
     description,
     notes: '',
     amount: dec(cents(amount)),
-    direction: 'WITHDRAWAL',
+    direction,
     verificationStatus: verified ? 'VERIFIED' : 'NOT_VERIFIED',
     active: true,
     missingFields: [],
     dateCreated: date,
     currency: { code: 'CAD' },
     origin: { type: 'GENERIC_EXTERNAL_API', description: null },
-    anchorLineItem: line(0, ACC.cash, amount, 'CREDIT'),
+    anchorLineItem: line(0, anchor, amount, deposit ? 'DEBIT' : 'CREDIT', { isReconciled: reconciled }),
     lineItems: [l],
     attachment: null,
     detailActions: { amount: true, date: true, description: true, account: true, category: true, notes: true, lineItems: true, split: true, canDelete: true, salesTax: true, verificationStatus: true },
@@ -79,10 +81,24 @@ export function createFakeInternal({ transactions = Array.from({ length: 30 }, (
     return { totalTaxAmount: dec(list.reduce((s, t) => s + cents(t.amount), 0)), taxLiabilities: list };
   }
 
+  let clearing = 0;
+  // Pairing as a transfer: both category lines move to a new Transfer Clearing account.
+  function matchTransfer(tx, li) {
+    const other = find(li.category.transactionId);
+    if (!other || !other.active || other.sequence !== li.category.transactionSequence) return { errors: [{ message: 'Stale transaction sequence', extensions: { code: 'FAILED_PRECONDITION', status: 412 } }], data: { transactionPatch: null } };
+    const account = { id: `acc-clear-${++clearing}`, name: 'Transfer Clearing', subtype: { value: 'TRANSFERS' } };
+    tx.lineItems.find((l) => l.order === li.order).account = account;
+    other.lineItems.find((l) => l.order === li.category.lineItemOrder).account = account;
+    tx.sequence += 1;
+    other.sequence += 1;
+    return { data: { transactionPatch: { didSucceed: true, inputErrors: [], transaction: structuredClone(tx), sideEffects: [{ id: other.id }] } } };
+  }
+
   function applyPatch(input) {
     const tx = find(input.id);
     if (!tx || !tx.active) return { errors: [{ message: 'Not found', extensions: { code: 'NOT_FOUND' } }], data: { transactionPatch: null } };
     if (input.sequence !== tx.sequence) return { errors: [{ message: 'Stale transaction sequence', extensions: { code: 'FAILED_PRECONDITION', status: 412 } }], data: { transactionPatch: null } };
+    if (input.lineItems?.[0]?.category?.type === 'MATCHING_TRANSFER') return matchTransfer(tx, input.lineItems[0]);
     const next = structuredClone(tx);
     for (const k of ['date', 'description', 'notes', 'verificationStatus']) if (input[k] !== undefined) next[k] = input[k];
     if (input.anchorLineItem) {
@@ -151,6 +167,16 @@ export function createFakeInternal({ transactions = Array.from({ length: 30 }, (
       return { data: { business: { id: v.businessId, salesTaxSummary: { baseLineItemAmount: '0', taxTotalAmount: '0', taxCalculationErrored: false, appliedTaxes: applied } } } };
     },
     TransactionPatch: (v) => applyPatch(v.input),
+    // Wave's matching candidates: same amount, opposite direction, another account, within 7 days, not already a transfer.
+    TransactionCategories: (v) => {
+      const i = v.input;
+      const days = (a, b) => Math.abs(Date.parse(a) - Date.parse(b)) / 86_400_000;
+      const categories = txs
+        .filter((t) => t.active && t.anchorLineItem && t.lineItems.length === 1 && t.direction !== i.direction && cents(t.amount) === cents(i.transactionAmount) && t.anchorLineItem.account.id !== i.anchorId && days(t.date, i.transactionDate) <= 7 && t.lineItems[0].account?.subtype?.value !== 'TRANSFERS')
+        .map((t) => ({ label: `${t.anchorLineItem.account.name} - ${t.date} - ${t.description}`, type: 'MATCHING_TRANSFER', accountId: null, transactionId: t.id, transactionSequence: t.sequence, lineItemOrder: t.lineItems[0].order, categorizationSubGroupValue: `MATCHING_TRANSFER_${i.direction}` }));
+      categories.push({ label: 'Marketing', type: 'ACCOUNT_ID', accountId: ACC.marketing.id, transactionId: null, transactionSequence: 0, lineItemOrder: 0, categorizationSubGroupValue: 'EXPENSE_WITHDRAWAL' });
+      return { data: { transactionCategories: { categories } } };
+    },
     TransactionDelete: (v) => {
       const tx = find(v.input.id);
       if (!tx || v.input.sequence !== tx.sequence) return { errors: [{ message: 'Stale transaction sequence', extensions: { code: 'FAILED_PRECONDITION' } }], data: { transactionDelete: null } };

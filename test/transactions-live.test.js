@@ -428,3 +428,84 @@ test('rows and lines show when Wave guessed the category and nobody approved it'
   assert.equal(g.json.lines[0].autoCategory, 'not_approved');
   assert.equal(g.json.anchor.autoCategory, undefined);
 });
+
+const transferPair = () => [
+  makeTx(1, { date: '2026-11-17', description: 'Card payment', amount: '125.00', category: ACC.uncat, autocat: 'NOT_APPROVED' }),
+  makeTx(2, { date: '2026-11-18', description: 'Payment received', amount: '125.00', category: ACC.uncatIncome, anchor: ACC.card, direction: 'DEPOSIT' }),
+  makeTx(3, { date: '2026-11-18', description: 'Other card refund', amount: '20.00', anchor: ACC.card, direction: 'DEPOSIT' }),
+];
+
+test('find transfer matches: asks Wave as the web app does and shows each candidate', async (t) => {
+  const h = await live(t, { transactions: transferPair() });
+  const r = await h.call('wave_find_transfer_matches', { id: 'tx-1' });
+  assert.equal(r.isError, false, r.text);
+  const sent = h.internal.calls.find((c) => c.name === 'TransactionCategories').variables;
+  assert.deepEqual(sent.input, {
+    transactionDate: '2026-11-17',
+    direction: 'WITHDRAWAL',
+    transactionType: 'ANCHOR',
+    lineItemCategory: { type: 'ACCOUNT_ID', accountId: ACC.uncat.id },
+    anchorId: ACC.cash.id,
+    anchorItemType: 'CREDIT',
+    isTransactionMultiLine: false,
+    transactionAmount: '125.00',
+    lineItemItemType: 'DEBIT',
+    groupFilter: 'DEFAULT_CATEGORY_SUBGROUP',
+  });
+  assert.equal(r.json.matches.length, 1);
+  assert.equal(r.json.matches[0].id, 'tx-2');
+  assert.equal(r.json.matches[0].account, 'Visa');
+  assert.equal(r.json.matches[0].daysApart, 1);
+  assert.equal(patches(h.internal).length, 0);
+
+  const none = await h.call('wave_find_transfer_matches', { id: 'tx-3' });
+  assert.ok(!none.json.matches?.length);
+  assert.match(none.json.note, /no matching transaction/);
+});
+
+test('match transfer: dry run, then the web app patch, and both sides become a transfer', async (t) => {
+  const h = await live(t, { transactions: transferPair() });
+  const dry = await h.call('wave_match_transfer', { id: 'tx-1', matchId: 'tx-2', dryRun: true });
+  assert.equal(dry.isError, false, dry.text);
+  assert.equal(dry.json.dryRun, true);
+  assert.deepEqual(dry.json.input, { id: 'tx-1', sequence: 1, lineItems: [{ order: 1, category: { type: 'MATCHING_TRANSFER', transactionId: 'tx-2', transactionSequence: 1, lineItemOrder: 1 } }] });
+  assert.deepEqual(dry.json.categoriesReplaced.map((c) => c.category), ['Uncategorized Expense', 'Uncategorized Income']);
+  assert.equal(patches(h.internal).length, 0, 'dry run saves nothing');
+
+  const r = await h.call('wave_match_transfer', { id: 'tx-1', matchId: 'tx-2' });
+  assert.equal(r.isError, false, r.text);
+  assert.equal(r.json.ok, true);
+  assert.deepEqual(r.json.matched.map((s) => s.category), ['Transfer Clearing', 'Transfer Clearing']);
+  assert.deepEqual(r.json.matched.map((s) => s.sequence), [2, 2]);
+  assert.equal(patches(h.internal).length, 1);
+
+  const again = await h.call('wave_match_transfer', { id: 'tx-1', matchId: 'tx-2' });
+  assert.equal(again.isError, true);
+  assert.match(again.text, /already one side of a transfer/);
+});
+
+test('match transfer refuses pairs that are not a transfer', async (t) => {
+  const txs = [
+    ...transferPair(),
+    makeTx(4, { date: '2026-11-17', description: 'Same account deposit', amount: '125.00', direction: 'DEPOSIT' }),
+    makeTx(5, { date: '2026-11-18', description: 'Reconciled payment', amount: '50.00', anchor: ACC.card, direction: 'DEPOSIT', reconciled: true }),
+    makeTx(6, { date: '2026-11-17', description: 'Transfer out', amount: '50.00' }),
+    makeTx(7, { date: '2026-11-17', description: 'Withdrawal on card', amount: '125.00', anchor: ACC.card }),
+    makeTx(8, { date: '2026-12-30', description: 'Late payment', amount: '125.00', anchor: ACC.card, direction: 'DEPOSIT' }),
+  ];
+  const h = await live(t, { transactions: txs });
+  const cases = [
+    [{ id: 'tx-1', matchId: 'tx-1' }, /itself/],
+    [{ id: 'tx-1', matchId: 'tx-4' }, /same account/],
+    [{ id: 'tx-1', matchId: 'tx-3' }, /amounts differ/],
+    [{ id: 'tx-1', matchId: 'tx-7' }, /both transactions are withdrawals/],
+    [{ id: 'tx-6', matchId: 'tx-5' }, /reconciled/],
+    [{ id: 'tx-1', matchId: 'tx-8' }, /does not list/],
+  ];
+  for (const [args, re] of cases) {
+    const r = await h.call('wave_match_transfer', args);
+    assert.equal(r.isError, true, JSON.stringify(args));
+    assert.match(r.text, re, JSON.stringify(args));
+  }
+  assert.equal(patches(h.internal).length, 0);
+});

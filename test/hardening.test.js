@@ -8,7 +8,7 @@ import { ACC, SESSION, combineFakes, createFakeInternal, makeTx } from './helper
 import { loadConfig, pinnedWaveUrl } from '../src/config.js';
 
 const BOTH = `WAVE_ACCESS_TOKEN=${TOKEN}\nWAVE_SESSION_TOKEN=${SESSION}\n`;
-const DEFAULTS = { WAVE_MCP_ALLOW_EMAIL: '', WAVE_MCP_ALLOW_LEDGER_EDITS: '' };
+const DEFAULTS = { WAVE_MCP_ALLOW_EMAIL: '', WAVE_MCP_ALLOW_LEDGER_EDITS: '', WAVE_MCP_ALLOW_TRANSFERS: '' };
 
 async function hardened(t, { transactions } = {}) {
   const internal = createFakeInternal(transactions ? { transactions } : {});
@@ -39,6 +39,7 @@ test('endpoints are pinned to https on waveapps.com', () => {
   const config = loadConfig({});
   assert.equal(config.allowEmail, false);
   assert.equal(config.allowLedgerEdits, false);
+  assert.equal(config.allowTransfers, false);
 });
 
 test('by default no email tools and no transaction delete are registered', async (t) => {
@@ -47,7 +48,9 @@ test('by default no email tools and no transaction delete are registered', async
   assert.deepEqual(names.filter((n) => /^wave_send_/.test(n)), []);
   assert.ok(!names.includes('wave_delete_transaction'));
   assert.ok(names.includes('wave_update_transaction'));
-  assert.equal(names.length, 67);
+  assert.ok(!names.includes('wave_match_transfer'), 'transfer matching is opt-in');
+  assert.ok(names.includes('wave_find_transfer_matches'), 'finding matches only reads');
+  assert.equal(names.length, 68);
 });
 
 test('by default edits are limited to categorizing', async (t) => {
