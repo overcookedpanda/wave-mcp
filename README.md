@@ -22,7 +22,7 @@ Upstream behaviour is opt-in through the switches below.
 | Credentials only go to Wave: `WAVE_API_URL`, `WAVE_INTERNAL_API_URL` and `WAVE_OAUTH_BASE_URL` must be `https` on `waveapps.com` or a subdomain, with no port or userinfo | always on | none |
 | Tools that email customers (`wave_send_*`) are not registered | off | `WAVE_MCP_ALLOW_EMAIL=1` |
 | `wave_update_transaction` only categorizes: category, vendor/customer, sales tax, notes, reviewed, and splits that keep the total. Date, description, bank/card account, amount and journal entry lines are refused. `wave_delete_transaction` is not registered | off | `WAVE_MCP_ALLOW_LEDGER_EDITS=1` |
-| `wave_match_transfer`, which pairs two transactions Wave lists as matches into one transfer between your own accounts (it replaces both categories), is not registered. `wave_find_transfer_matches` only reads and is always there | off | `WAVE_MCP_ALLOW_TRANSFERS=1` |
+| Transfers between your own accounts are not recorded: `wave_match_transfer` (pairs two transactions Wave lists as matches, replacing both categories) and `wave_create_transfer` (adds the missing side in an account with no feed, such as a loan, after Wave's reconciliation check) are not registered. `wave_find_transfer_matches` only reads and is always there | off | `WAVE_MCP_ALLOW_TRANSFERS=1` |
 | No npm publishing: the release job is removed from CI and `package.json` is `private` | always on | none |
 | `.gitignore` also excludes exports, statements and local notes (`*.zip`, `*.csv`, `*.pdf`, `*.ofx`, `*.qfx`, `local/`, `dumps/`) | always on | none |
 

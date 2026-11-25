@@ -89,6 +89,19 @@ query TransactionCategories($businessId: ID!, $input: TransactionCategoriesInput
   }
 }`;
 
+/**
+ * Whether changing a transaction in an account on a date would disturb a
+ * reconciled statement period, as the web app asks before recording a
+ * transfer. Verified against the web app's request on 2026-11-25.
+ */
+IOPS.DoesImpactReconciliation = /* GraphQL */ `
+query DoesImpactReconciliation($businessId: ID!, $changes: [TransactionChangesForReconciliationImpact!]!) {
+  business(id: $businessId) {
+    id
+    doesImpactReconciliation(changes: $changes) { impactType periodId transactionId lineItemOrder }
+  }
+}`;
+
 IOPS.TransactionPatch = /* GraphQL */ `
 mutation TransactionPatch($input: TransactionPatchInput!) {
   transactionPatch(input: $input) {

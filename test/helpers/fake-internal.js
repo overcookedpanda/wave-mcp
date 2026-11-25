@@ -9,6 +9,7 @@ export const SESSION = 'sess-token';
 export const ACC = {
   cash: { id: 'acc-cash', name: 'Cash on Hand', subtype: { value: 'CASH_AND_BANK' } },
   card: { id: 'acc-card', name: 'Visa', subtype: { value: 'CREDIT_CARD' } },
+  loan: { id: 'acc-loan', name: 'Equipment Loan', subtype: { value: 'LOANS' } },
   uncat: { id: 'acc-uncat', name: 'Uncategorized Expense', subtype: { value: 'UNCATEGORIZED_EXPENSE' } },
   uncatIncome: { id: 'acc-uncat-in', name: 'Uncategorized Income', subtype: { value: 'UNCATEGORIZED_INCOME' } },
   marketing: { id: 'acc-mkt', name: 'Marketing', subtype: { value: 'EXPENSE' } },
@@ -64,7 +65,7 @@ export function makeTx(n, { date = `2026-10-${String(n).padStart(2, '0')}`, desc
   };
 }
 
-export function createFakeInternal({ transactions = Array.from({ length: 30 }, (_, i) => makeTx(i + 1)) } = {}) {
+export function createFakeInternal({ transactions = Array.from({ length: 30 }, (_, i) => makeTx(i + 1)), reconciledAccounts = [] } = {}) {
   const txs = transactions.map((t) => structuredClone(t));
   const calls = [];
   const opName = (query) => query.match(/^\s*(?:query|mutation)\s+([A-Za-z_]\w*)/m)?.[1];
@@ -94,11 +95,25 @@ export function createFakeInternal({ transactions = Array.from({ length: 30 }, (
     return { data: { transactionPatch: { didSucceed: true, inputErrors: [], transaction: structuredClone(tx), sideEffects: [{ id: other.id }] } } };
   }
 
+  // A transfer with no other side: Wave adds one in the target account.
+  function createTransfer(tx, li, input) {
+    if (input.errorIfReconciliationIsImpacted && reconciledAccounts.includes(li.category.accountId)) return { data: { transactionPatch: invalid({ transactions: [{ __all__: ['Reconciliation is impacted.'] }] }) } };
+    const account = { id: `acc-clear-${++clearing}`, name: 'Transfer Clearing', subtype: { value: 'TRANSFERS' } };
+    const target = ACCOUNTS.find((a) => a.id === li.category.accountId);
+    const other = makeTx(txs.length + 100, { date: tx.date, description: tx.description, amount: tx.amount, category: account, anchor: target, direction: tx.direction === 'WITHDRAWAL' ? 'DEPOSIT' : 'WITHDRAWAL' });
+    other.id = `tx-created-${clearing}`;
+    txs.push(other);
+    tx.lineItems.find((l) => l.order === li.order).account = account;
+    tx.sequence += 1;
+    return { data: { transactionPatch: { didSucceed: true, inputErrors: [], transaction: structuredClone(tx), sideEffects: [{ id: other.id }] } } };
+  }
+
   function applyPatch(input) {
     const tx = find(input.id);
     if (!tx || !tx.active) return { errors: [{ message: 'Not found', extensions: { code: 'NOT_FOUND' } }], data: { transactionPatch: null } };
     if (input.sequence !== tx.sequence) return { errors: [{ message: 'Stale transaction sequence', extensions: { code: 'FAILED_PRECONDITION', status: 412 } }], data: { transactionPatch: null } };
     if (input.lineItems?.[0]?.category?.type === 'MATCHING_TRANSFER') return matchTransfer(tx, input.lineItems[0]);
+    if (input.lineItems?.[0]?.category?.type === 'CREATE_TRANSFER') return createTransfer(tx, input.lineItems[0], input);
     const next = structuredClone(tx);
     for (const k of ['date', 'description', 'notes', 'verificationStatus']) if (input[k] !== undefined) next[k] = input[k];
     if (input.anchorLineItem) {
@@ -167,6 +182,7 @@ export function createFakeInternal({ transactions = Array.from({ length: 30 }, (
       return { data: { business: { id: v.businessId, salesTaxSummary: { baseLineItemAmount: '0', taxTotalAmount: '0', taxCalculationErrored: false, appliedTaxes: applied } } } };
     },
     TransactionPatch: (v) => applyPatch(v.input),
+    DoesImpactReconciliation: (v) => ({ data: { business: { id: v.businessId, doesImpactReconciliation: v.changes.filter((c) => reconciledAccounts.includes(c.accountId)).map(() => ({ impactType: 'RECONCILED_PERIOD', periodId: 'period-1', transactionId: null, lineItemOrder: null })) } } }),
     // Wave's matching candidates: same amount, opposite direction, another account, within 7 days, not already a transfer.
     TransactionCategories: (v) => {
       const i = v.input;
@@ -174,6 +190,7 @@ export function createFakeInternal({ transactions = Array.from({ length: 30 }, (
       const categories = txs
         .filter((t) => t.active && t.anchorLineItem && t.lineItems.length === 1 && t.direction !== i.direction && cents(t.amount) === cents(i.transactionAmount) && t.anchorLineItem.account.id !== i.anchorId && days(t.date, i.transactionDate) <= 7 && t.lineItems[0].account?.subtype?.value !== 'TRANSFERS')
         .map((t) => ({ label: `${t.anchorLineItem.account.name} - ${t.date} - ${t.description}`, type: 'MATCHING_TRANSFER', accountId: null, transactionId: t.id, transactionSequence: t.sequence, lineItemOrder: t.lineItems[0].order, categorizationSubGroupValue: `MATCHING_TRANSFER_${i.direction}` }));
+      for (const a of [ACC.cash, ACC.card, ACC.loan]) if (a.id !== i.anchorId) categories.push({ label: a.name, type: 'CREATE_TRANSFER', accountId: a.id, transactionId: null, transactionSequence: 0, lineItemOrder: 0, categorizationSubGroupValue: `CREATE_TRANSFER_${i.direction}` });
       categories.push({ label: 'Marketing', type: 'ACCOUNT_ID', accountId: ACC.marketing.id, transactionId: null, transactionSequence: 0, lineItemOrder: 0, categorizationSubGroupValue: 'EXPENSE_WITHDRAWAL' });
       return { data: { transactionCategories: { categories } } };
     },

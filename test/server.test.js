@@ -7,7 +7,7 @@ test('tool catalog: names, annotations, descriptions and schemas', async (t) => 
   const h = await connect(createFakeWave());
   t.after(h.close);
   const { tools } = await h.client.listTools();
-  assert.equal(tools.length, 75);
+  assert.equal(tools.length, 76);
   for (const tool of tools) {
     assert.match(tool.name, /^wave_[a-z_]+$/);
     assert.ok(tool.description.length > 20, `${tool.name} description`);

@@ -12,8 +12,8 @@ import { loadConfig } from '../src/config.js';
 
 const BOTH = `WAVE_ACCESS_TOKEN=${TOKEN}\nWAVE_SESSION_TOKEN=${SESSION}\n`;
 
-async function live(t, { transactions, credentials = BOTH } = {}) {
-  const internal = createFakeInternal(transactions ? { transactions } : {});
+async function live(t, { transactions, credentials = BOTH, reconciledAccounts } = {}) {
+  const internal = createFakeInternal({ ...(transactions ? { transactions } : {}), reconciledAccounts });
   const h = await connect(combineFakes(createFakeWave(), internal), { credentials: tempCredentials(credentials), env: { WAVE_BUSINESS_ID: BUSINESS.id } });
   t.after(h.close);
   return { ...h, internal };
@@ -456,6 +456,7 @@ test('find transfer matches: asks Wave as the web app does and shows each candid
   assert.equal(r.json.matches[0].id, 'tx-2');
   assert.equal(r.json.matches[0].account, 'Visa');
   assert.equal(r.json.matches[0].daysApart, 1);
+  assert.deepEqual(r.json.createTransferAccounts.map((a) => a.name), ['Visa', 'Equipment Loan']);
   assert.equal(patches(h.internal).length, 0);
 
   const none = await h.call('wave_find_transfer_matches', { id: 'tx-3' });
@@ -468,7 +469,7 @@ test('match transfer: dry run, then the web app patch, and both sides become a t
   const dry = await h.call('wave_match_transfer', { id: 'tx-1', matchId: 'tx-2', dryRun: true });
   assert.equal(dry.isError, false, dry.text);
   assert.equal(dry.json.dryRun, true);
-  assert.deepEqual(dry.json.input, { id: 'tx-1', sequence: 1, lineItems: [{ order: 1, category: { type: 'MATCHING_TRANSFER', transactionId: 'tx-2', transactionSequence: 1, lineItemOrder: 1 } }] });
+  assert.deepEqual(dry.json.input, { id: 'tx-1', sequence: 1, errorIfReconciliationIsImpacted: true, lineItems: [{ order: 1, category: { type: 'MATCHING_TRANSFER', transactionId: 'tx-2', transactionSequence: 1, lineItemOrder: 1 } }] });
   assert.deepEqual(dry.json.categoriesReplaced.map((c) => c.category), ['Uncategorized Expense', 'Uncategorized Income']);
   assert.equal(patches(h.internal).length, 0, 'dry run saves nothing');
 
@@ -504,6 +505,41 @@ test('match transfer refuses pairs that are not a transfer', async (t) => {
   ];
   for (const [args, re] of cases) {
     const r = await h.call('wave_match_transfer', args);
+    assert.equal(r.isError, true, JSON.stringify(args));
+    assert.match(r.text, re, JSON.stringify(args));
+  }
+  assert.equal(patches(h.internal).length, 0);
+});
+
+test('create transfer: a loan payment with no other side, after Wave\'s reconciliation check', async (t) => {
+  const loanPayment = makeTx(1, { date: '2026-11-04', description: 'Loan payment', amount: '75.00', category: ACC.uncat });
+  const h = await live(t, { transactions: [loanPayment] });
+  const dry = await h.call('wave_create_transfer', { id: 'tx-1', accountId: ACC.loan.id, dryRun: true });
+  assert.equal(dry.isError, false, dry.text);
+  assert.deepEqual(dry.json.input.lineItems[0].category, { type: 'CREATE_TRANSFER', accountId: ACC.loan.id });
+  assert.equal(dry.json.to, 'Equipment Loan');
+  assert.deepEqual(h.internal.calls.find((c) => c.name === 'DoesImpactReconciliation').variables.changes, [{ accountId: ACC.loan.id, transactionDate: '2026-11-04' }]);
+  assert.equal(patches(h.internal).length, 0, 'dry run saves nothing');
+
+  const r = await h.call('wave_create_transfer', { id: 'tx-1', accountId: ACC.loan.id });
+  assert.equal(r.isError, false, r.text);
+  assert.equal(r.json.ok, true);
+  assert.equal(r.json.transaction.category, 'Transfer Clearing');
+  assert.equal(r.json.otherSide.account, 'Equipment Loan');
+  assert.equal(r.json.otherSide.direction, 'deposit');
+  assert.deepEqual(patches(h.internal)[0].variables.input, { id: 'tx-1', sequence: 1, errorIfReconciliationIsImpacted: true, lineItems: [{ order: 1, category: { type: 'CREATE_TRANSFER', accountId: ACC.loan.id }, taxAction: null }] }, 'the web app\'s patch, nulls kept');
+});
+
+test('create transfer refuses a duplicate side, an account Wave does not offer, and reconciled periods', async (t) => {
+  const h = await live(t, { transactions: transferPair(), reconciledAccounts: [ACC.loan.id] });
+  const cases = [
+    [{ id: 'tx-1', accountId: ACC.card.id }, /already lists tx-2 .* wave_match_transfer/],
+    [{ id: 'tx-1', accountId: ACC.cash.id }, /already in/],
+    [{ id: 'tx-1', accountId: ACC.marketing.id }, /does not offer/],
+    [{ id: 'tx-1', accountId: ACC.loan.id, dryRun: true }, /reconciled statement period/],
+  ];
+  for (const [args, re] of cases) {
+    const r = await h.call('wave_create_transfer', args);
     assert.equal(r.isError, true, JSON.stringify(args));
     assert.match(r.text, re, JSON.stringify(args));
   }

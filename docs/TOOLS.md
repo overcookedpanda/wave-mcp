@@ -1093,7 +1093,7 @@ Categorize a transaction as in the Wave web app: category, vendor or customer, s
 
 **Find transfer matches** · toolset `transactions` · read
 
-Which transactions Wave would pair with this one as the other side of a transfer between two of the business's bank, credit card or loan accounts, as the web app lists them under "Select Account with Matching Transaction". Wave chooses the candidates (same amount, opposite direction, another account, nearby date). Returns each candidate with its date, amount, account and current category. Changes nothing. Uses Wave's web-app API (unofficial), which needs a web session: if it is missing or expired, the user runs node <package>/bin/wave-mcp.js login in a terminal on <host>.
+Which transactions Wave would pair with this one as the other side of a transfer between two of the business's bank, credit card or loan accounts, as the web app lists them under "Select Account with Matching Transaction". Wave chooses the candidates (same amount, opposite direction, another account, nearby date). Returns each candidate with its date, amount, account and current category, plus createTransferAccounts: the accounts Wave offers under "Select Account to Create Transfer" when there is no other side to match. Changes nothing. Uses Wave's web-app API (unofficial), which needs a web session: if it is missing or expired, the user runs node <package>/bin/wave-mcp.js login in a terminal on <host>.
 
 | Parameter | Type | Required | Default | Notes |
 |---|---|---|---|---|
