@@ -92,3 +92,13 @@ test('by default journal entry lines cannot be edited', async (t) => {
   assert.match(r.text, /journal entr/i);
   assert.equal(patches(h.internal).length, 0);
 });
+
+test('by default the transfer finder says what recording a transfer needs', async (t) => {
+  const txs = [makeTx(1, { date: '2026-11-16', amount: '28.00', category: ACC.uncat })];
+  const h = await hardened(t, { transactions: txs });
+  const r = await h.call('wave_find_transfer_matches', { id: 'tx-1' });
+  assert.equal(r.isError, false, r.text);
+  assert.equal(r.json.matchesFound, 0);
+  assert.equal(r.json.createTransferAccountsFound, 2);
+  assert.match(r.json.note, /does not offer it: it needs WAVE_MCP_ALLOW_TRANSFERS=1 and WAVE_MCP_READ_ONLY off/);
+});

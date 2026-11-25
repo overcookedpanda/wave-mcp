@@ -450,18 +450,20 @@ test('find transfer matches: asks Wave as the web app does and shows each candid
     isTransactionMultiLine: false,
     transactionAmount: '125.00',
     lineItemItemType: 'DEBIT',
-    groupFilter: 'DEFAULT_CATEGORY_SUBGROUP',
+    groupFilter: 'TRANSFER_CATEGORY_SUBGROUP',
   });
   assert.equal(r.json.matches.length, 1);
   assert.equal(r.json.matches[0].id, 'tx-2');
   assert.equal(r.json.matches[0].account, 'Visa');
   assert.equal(r.json.matches[0].daysApart, 1);
   assert.deepEqual(r.json.createTransferAccounts.map((a) => a.name), ['Visa', 'Equipment Loan']);
+  assert.match(r.json.note, /^wave_match_transfer records/);
   assert.equal(patches(h.internal).length, 0);
 
   const none = await h.call('wave_find_transfer_matches', { id: 'tx-3' });
   assert.ok(!none.json.matches?.length);
-  assert.match(none.json.note, /no matching transaction/);
+  assert.match(none.json.note, /no matching transaction.*wave_create_transfer records/);
+  assert.equal(none.json.matchesFound, 0);
 });
 
 test('match transfer: dry run, then the web app patch, and both sides become a transfer', async (t) => {

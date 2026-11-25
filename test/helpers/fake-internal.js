@@ -187,11 +187,13 @@ export function createFakeInternal({ transactions = Array.from({ length: 30 }, (
     TransactionCategories: (v) => {
       const i = v.input;
       const days = (a, b) => Math.abs(Date.parse(a) - Date.parse(b)) / 86_400_000;
+      // Like Wave: the default list has only plain categories; the transfer choices come with TRANSFER_CATEGORY_SUBGROUP.
+      const plain = { label: 'Marketing', type: 'ACCOUNT_ID', accountId: ACC.marketing.id, transactionId: null, transactionSequence: 0, lineItemOrder: 0, categorizationSubGroupValue: 'EXPENSE_WITHDRAWAL' };
+      if (i.groupFilter !== 'TRANSFER_CATEGORY_SUBGROUP') return { data: { transactionCategories: { categories: [plain] } } };
       const categories = txs
         .filter((t) => t.active && t.anchorLineItem && t.lineItems.length === 1 && t.direction !== i.direction && cents(t.amount) === cents(i.transactionAmount) && t.anchorLineItem.account.id !== i.anchorId && days(t.date, i.transactionDate) <= 7 && t.lineItems[0].account?.subtype?.value !== 'TRANSFERS')
         .map((t) => ({ label: `${t.anchorLineItem.account.name} - ${t.date} - ${t.description}`, type: 'MATCHING_TRANSFER', accountId: null, transactionId: t.id, transactionSequence: t.sequence, lineItemOrder: t.lineItems[0].order, categorizationSubGroupValue: `MATCHING_TRANSFER_${i.direction}` }));
       for (const a of [ACC.cash, ACC.card, ACC.loan]) if (a.id !== i.anchorId) categories.push({ label: a.name, type: 'CREATE_TRANSFER', accountId: a.id, transactionId: null, transactionSequence: 0, lineItemOrder: 0, categorizationSubGroupValue: `CREATE_TRANSFER_${i.direction}` });
-      categories.push({ label: 'Marketing', type: 'ACCOUNT_ID', accountId: ACC.marketing.id, transactionId: null, transactionSequence: 0, lineItemOrder: 0, categorizationSubGroupValue: 'EXPENSE_WITHDRAWAL' });
       return { data: { transactionCategories: { categories } } };
     },
     TransactionDelete: (v) => {

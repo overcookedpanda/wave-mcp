@@ -640,27 +640,41 @@ export function registerLiveTransactionTools(server, ctx) {
    * amount, opposite direction, another bank/card/loan account, nearby date).
    */
   async function waveTransferMatches(bid, tx, line) {
-    const data = await ctx.internal.request(IOPS.TransactionCategories, {
-      businessId: bid,
-      input: {
-        transactionDate: tx.date,
-        direction: tx.direction,
-        transactionType: 'ANCHOR',
-        lineItemCategory: category(line.account?.id),
-        anchorId: tx.anchorLineItem.account?.id,
-        anchorItemType: tx.anchorLineItem.itemType,
-        isTransactionMultiLine: false,
-        transactionAmount: fromMinor(toMinor(tx.amount)),
-        lineItemItemType: line.itemType,
-        groupFilter: 'DEFAULT_CATEGORY_SUBGROUP',
-      },
-    });
-    const all = data.transactionCategories?.categories || [];
-    return {
-      matches: all.filter((c) => c.type === 'MATCHING_TRANSFER' && c.transactionId),
-      accounts: all.filter((c) => c.type === 'CREATE_TRANSFER' && c.accountId),
+    // The web app loads the transfer choices separately, when the Transfer
+    // group is opened (TRANSFER_CATEGORY_SUBGROUP); the default list only
+    // has their headings. Fall back to the default list if that is empty.
+    const ask = (groupFilter) =>
+      ctx.internal.request(IOPS.TransactionCategories, {
+        businessId: bid,
+        input: {
+          transactionDate: tx.date,
+          direction: tx.direction,
+          transactionType: 'ANCHOR',
+          lineItemCategory: category(line.account?.id),
+          anchorId: tx.anchorLineItem.account?.id,
+          anchorItemType: tx.anchorLineItem.itemType,
+          isTransactionMultiLine: false,
+          transactionAmount: fromMinor(toMinor(tx.amount)),
+          lineItemItemType: line.itemType,
+          groupFilter,
+        },
+      });
+    const pick = (data) => {
+      const all = data.transactionCategories?.categories || [];
+      return {
+        matches: all.filter((c) => c.type === 'MATCHING_TRANSFER' && c.transactionId),
+        accounts: all.filter((c) => c.type === 'CREATE_TRANSFER' && c.accountId),
+      };
     };
+    const found = pick(await ask('TRANSFER_CATEGORY_SUBGROUP'));
+    if (found.matches.length || found.accounts.length) return found;
+    return pick(await ask('DEFAULT_CATEGORY_SUBGROUP'));
   }
+
+  // Whether the tools that record a transfer are registered in this server.
+  const canRecordTransfers = Boolean(ctx.config.allowTransfers) && !ctx.config.readOnly;
+  const recordWith = (tool, what) =>
+    canRecordTransfers ? `${tool} records ${what}.` : `${tool} can record ${what}, but this server does not offer it: it needs WAVE_MCP_ALLOW_TRANSFERS=1 and WAVE_MCP_READ_ONLY off. Otherwise record it in the Wave web app.`;
 
   /** Reconciled statement periods that recording a change in this account on this date would disturb. */
   async function reconciliationImpact(bid, accountId, txDate) {
@@ -699,11 +713,15 @@ export function registerLiveTransactionTools(server, ctx) {
         {
           transaction: side(tx),
           matches,
+          matchesFound: found.length,
           ...(found.length > matches.length ? { moreMatches: found.length - matches.length } : {}),
+          createTransferAccountsFound: accounts.length,
           createTransferAccounts: accounts.map((c) => ({ accountId: c.accountId, name: c.label })),
-          ...(matches.length
-            ? {}
-            : { note: 'Wave lists no matching transaction for this one. If the other side will be imported (a bank or card feed), wait for it. If the other account has no feed, such as a loan, wave_create_transfer records the transfer into one of createTransferAccounts.' }),
+          note: matches.length
+            ? recordWith('wave_match_transfer', 'one of these matches')
+            : accounts.length
+              ? `Wave lists no matching transaction for this one. If the other account gets its own copy from a bank or card feed, wait for it to import. If it has no feed, such as a loan, ${recordWith('wave_create_transfer', 'the transfer into one of createTransferAccounts')}`
+              : 'Wave lists no matching transaction and offers no account to create a transfer into. Check that the other account exists in Wave (wave_list_accounts, e.g. subtypes [CREDIT_CARD] or [LOANS]).',
         },
         'full',
       );
