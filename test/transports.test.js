@@ -65,7 +65,7 @@ test('http: bearer token is enforced when configured', async (t) => {
   assert.equal((await fetch(`${base}/mcp`, { ...init, headers: { ...init.headers, Authorization: 'Bearer wrong' } })).status, 401);
   const client = new Client({ name: 'http-test', version: '1.0.0' });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: 'Bearer s3cret-value' } } }));
-  assert.equal((await client.listTools()).tools.length, 73);
+  assert.equal((await client.listTools()).tools.length, 67); // fork defaults: no email tools, no delete
   await client.close();
 });
 
